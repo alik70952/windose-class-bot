@@ -43,6 +43,7 @@ class AppConfig:
     profile_id: str = field(default_factory=lambda: uuid.uuid4().hex)
     browser: BrowserSettings = field(default_factory=BrowserSettings)
     schedules: list[ClassSchedule] = field(default_factory=list)
+    scheduler_sqlite_migration_completed: bool = False
 
 
 def default_vadana_profile() -> AppConfig:
@@ -71,11 +72,16 @@ class ConfigManager:
             return default_vadana_profile()
         with self.path.open("r", encoding="utf-8") as file:
             data: dict[str, Any] = json.load(file)
-        return self._from_dict(data)
+        config = self._from_dict(data)
+        if not config.scheduler_sqlite_migration_completed:
+            self._migrate_schedules_once(config)
+        return config
 
     def save(self, config: AppConfig) -> None:
         """Atomically write settings so the worker never reads partial JSON."""
         data = asdict(config)
+        # The queue is SQLite-only.  Keep the legacy field out of all future JSON writes.
+        data.pop("schedules", None)
         data.pop("password", None)
         for schedule in data.get("schedules", []):
             if isinstance(schedule, dict):
@@ -113,4 +119,26 @@ class ConfigManager:
                 session_dir=str(browser_data.get("session_dir", "browser-session")),
             ),
             schedules=schedules,
+            scheduler_sqlite_migration_completed=bool(data.get("scheduler_sqlite_migration_completed", False)),
         )
+
+    def _migrate_schedules_once(self, config: AppConfig) -> None:
+        """Import enabled, incomplete legacy jobs exactly once, then mark config."""
+        from datetime import datetime
+        from src.scheduling.schedule_store import ScheduleStore
+        store = ScheduleStore(PROJECT_ROOT / "data" / "scheduler.db")
+        for schedule in config.schedules:
+            if not schedule.enabled or schedule.completed or schedule.last_run_status not in ("", "Pending"):
+                continue
+            try:
+                when = datetime.fromisoformat(schedule.next_run).timestamp() if schedule.next_run else datetime.fromisoformat(
+                    f"{schedule.effective_run_date or schedule.date}T{schedule.effective_run_time or schedule.start_time}:00").timestamp()
+                if store.get(schedule.id) is None:
+                    store.create(schedule.profile_id, schedule.class_name, when, 0, 0,
+                                 schedule_id=schedule.id, max_attempts=max(1, schedule.retry_count + 1),
+                                 cancel_pending_same_class=False)
+            except (ValueError, OSError):
+                continue
+        config.schedules.clear()
+        config.scheduler_sqlite_migration_completed = True
+        self.save(config)

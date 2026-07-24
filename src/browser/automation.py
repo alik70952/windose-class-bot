@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+import os
 from pathlib import Path
 from typing import Callable
 
@@ -31,6 +32,26 @@ class BrowserAutomation:
         self.log = log
         self.stop_event = stop_event or threading.Event()
 
+    @staticmethod
+    def _persistent_context(playwright, settings: BrowserSettings):
+        """Prefer installed Chrome, then Playwright Chromium, then a Windows Chrome path."""
+        options = {"user_data_dir": str(Path(settings.session_dir)), "headless": settings.headless}
+        try:
+            return playwright.chromium.launch_persistent_context(channel="chrome", **options)
+        except PlaywrightError:
+            try:
+                return playwright.chromium.launch_persistent_context(**options)
+            except PlaywrightError:
+                candidates = (
+                    Path(os.environ.get("PROGRAMFILES", "")) / "Google/Chrome/Application/chrome.exe",
+                    Path(os.environ.get("PROGRAMFILES(X86)", "")) / "Google/Chrome/Application/chrome.exe",
+                    Path(os.environ.get("LOCALAPPDATA", "")) / "Google/Chrome/Application/chrome.exe",
+                )
+                chrome = next((path for path in candidates if path.is_file()), None)
+                if chrome is None:
+                    raise
+                return playwright.chromium.launch_persistent_context(executable_path=str(chrome), **options)
+
 
     def login_to_site(self, config: AppConfig, password: str, timeout_ms: int = 60_000) -> bool:
         """Run a site-adapter login in real Chrome without exposing credentials."""
@@ -39,11 +60,7 @@ class BrowserAutomation:
             adapter = get_adapter(config.site_adapter)
             with sync_playwright() as playwright:
                 if config.browser.save_session:
-                    context = playwright.chromium.launch_persistent_context(
-                        user_data_dir=str(Path(config.browser.session_dir)),
-                        channel="chrome",
-                        headless=config.browser.headless,
-                    )
+                    context = self._persistent_context(playwright, config.browser)
                     page = context.new_page() if not context.pages else context.pages[0]
                     browser = None
                 else:
@@ -96,11 +113,7 @@ class BrowserAutomation:
             playwright = playwright_manager.start() if hasattr(playwright_manager, "start") else playwright_manager.__enter__()
             self.log("Chrome در حال اجرا است")
             if config.browser.save_session:
-                context = playwright.chromium.launch_persistent_context(
-                    user_data_dir=str(Path(config.browser.session_dir)),
-                    channel="chrome",
-                    headless=config.browser.headless,
-                )
+                context = self._persistent_context(playwright, config.browser)
                 page = context.new_page() if not context.pages else context.pages[0]
             else:
                 browser = playwright.chromium.launch(channel="chrome", headless=config.browser.headless)

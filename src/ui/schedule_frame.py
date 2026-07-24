@@ -5,8 +5,10 @@ import uuid
 import customtkinter as ctk
 from src.classes.presets import CLASS_PRESETS, ClassPreset
 from src.scheduling.manager import ScheduleManager
+from src.scheduling.schedule_store import ScheduleStore
 from src.scheduling.models import ClassSchedule
-from src.scheduling.worker_task import WorkerTaskScheduler
+from src.scheduling.worker_task import ensure_scheduler_worker_running
+from src.security.credentials import CredentialStore
 
 
 class ScheduleFrame(ctk.CTkFrame):
@@ -14,6 +16,7 @@ class ScheduleFrame(ctk.CTkFrame):
     def __init__(self, master, config_manager, logs) -> None:
         super().__init__(master)
         self.manager = ScheduleManager(config_manager)
+        self.store = ScheduleStore()
         self.config_manager = config_manager
         self.logs = logs
         self.selected_id = ""
@@ -101,13 +104,26 @@ class ScheduleFrame(ctk.CTkFrame):
         s = self._schedule_from_form()
         if not s:
             return
-        self.manager.upsert(s)
+        config = self.config_manager.load()
+        if not config.profile_id or not config.username or not CredentialStore().get_password(config.profile_id, config.username):
+            self.status_label.configure(text="زمان‌بندی ثبت نشد: Profile یا Credential معتبر نیست.")
+            return
+        delay = self._delay()
+        assert delay is not None
+        item = self.store.create(s.profile_id, s.class_name, datetime.fromisoformat(s.next_run).timestamp(),
+                                 delay.days * 24 + delay.seconds // 3600,
+                                 (delay.seconds % 3600) // 60, schedule_id=s.id)
         self.selected_id = s.id
-        result = WorkerTaskScheduler().ensure_running()
+        result = ensure_scheduler_worker_running()
         self.logs.log(f"schedule_id: {s.id}")
-        self.logs.log(f"config.json: {self.config_manager.path.resolve()}")
-        self.logs.log("زمان‌بندی در Worker ثبت شد." if result.success else result.message)
-        self.status_label.configure(text="زمان‌بندی ثبت شد و Worker فعال است." if result.success else result.message)
+        current = self.store.get(item.id)
+        if result.success and current is not None and current.status == "pending":
+            self.logs.log("زمان‌بندی در SQLite ثبت شد و Heartbeat معتبر است.")
+            self.status_label.configure(text="تایم زمان‌بندی شما ثبت شد.")
+        else:
+            self.store.cancel(item.id)
+            self.logs.log("سرویس اجرای خودکار راه‌اندازی نشد.")
+            self.status_label.configure(text="زمان‌بندی ثبت نشد: سرویس اجرای خودکار راه‌اندازی نشد.")
         self.refresh()
 
     def refresh(self):

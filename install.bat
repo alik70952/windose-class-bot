@@ -90,6 +90,9 @@ if errorlevel 1 (
 )
 
 echo Registering the persistent background scheduler worker...
+for /f "tokens=1,* delims=," %%A in ('schtasks.exe /Query /FO CSV /V /NH 2^>nul') do (
+    echo %%A %%B | findstr /I /C:"VadanaClassBot-" /C:"scheduled_runner.py" /C:"schedule_worker.py" /C:"cmd.exe" /C:"run.bat" /C:"main.py" >nul && schtasks.exe /Delete /F /TN %%~A >nul 2>nul
+)
 "%VENV_PY%" main.py --install-worker
 if errorlevel 1 (call :fail 1 "Worker registration" & exit /b 1)
 

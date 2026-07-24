@@ -159,12 +159,12 @@ Presetها فقط مقدار اولیه هستند. کاربر می‌تواند
 
 ### Worker دائمی زمان‌بندی
 
-برنامه برای هر کلاس Windows Task جداگانه نمی‌سازد. فقط یک Task ثابت با نام `VadanaClassBot-Worker` هنگام نصب یا ذخیره زمان‌بندی، به‌صورت idempotent ثبت می‌شود. Trigger آن ورود کاربر به Windows است و Windows در صورت Crash، Worker را با فاصله یک دقیقه دوباره اجرا می‌کند.
+صف زمان‌بندی فقط در `data/scheduler.db` نگهداری می‌شود و `config.json` فقط Profile و تنظیمات عمومی را دارد. برنامه برای هر کلاس Windows Task جداگانه نمی‌سازد. فقط یک Task ثابت با نام `VadanaClassBotWorker` ثبت می‌شود. Trigger آن ورود کاربر به Windows است و Windows در صورت Crash، Worker را با فاصله یک دقیقه دوباره اجرا می‌کند.
 
 Task، Worker مستقل از رابط گرافیکی را با Python بدون پنجره اجرا می‌کند:
 
 ```powershell
-.venv\Scripts\pythonw.exe src\schedule_worker.py
+.venv\Scripts\pythonw.exe -m src.scheduler_worker
 ```
 
 Worker هر ۱۵ ثانیه Scheduleهای فعال را از `config.json` می‌خواند، موارد رسیده را در Thread مستقل اجرا می‌کند و پس از پایان هر اجرا زنده می‌ماند. حذف زمان‌بندی فقط رکورد محلی را حذف می‌کند و Task ثابت Worker دست‌نخورده می‌ماند. قفل Process مانع اجرای دو Worker هم‌زمان می‌شود و قفل هر Schedule/Profile نیز از اجرای تکراری جلوگیری می‌کند.

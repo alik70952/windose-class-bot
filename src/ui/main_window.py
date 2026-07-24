@@ -48,6 +48,9 @@ class MainWindow(ctk.CTk):
         self._build_ui()
         self.protocol("WM_DELETE_WINDOW", self._on_close)
         self.load_config()
+        # Do not block Tk startup while Task Scheduler/heartbeat is checked.
+        from src.scheduling.worker_task import ensure_scheduler_worker_running
+        threading.Thread(target=ensure_scheduler_worker_running, name="scheduler-health", daemon=True).start()
         self._poll_logs()
 
     def _build_ui(self) -> None:

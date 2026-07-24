@@ -1,0 +1,20 @@
+{
+  "site": {
+    "name": "University Website",
+    "login_url": "https://example.com/login"
+  },
+  "browser": {
+    "name": "chrome",
+    "headless": false,
+    "keep_open": true
+  },
+  "credentials": {
+    "username": "",
+    "password": ""
+  },
+  "class": {
+    "name": "",
+    "adobe_connect_url": ""
+  },
+  "steps": []
+}

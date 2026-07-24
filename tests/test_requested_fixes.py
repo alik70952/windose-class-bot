@@ -1,5 +1,6 @@
 from __future__ import annotations
 import threading, time
+from pathlib import Path
 from unittest.mock import Mock
 from src.browser.adobe_connect import AdobeConnectLauncher
 from src.scheduling.models import ClassSchedule
@@ -19,11 +20,12 @@ def test_schedule_model_requested_fields_no_password():
 
 def test_task_uses_schedule_id_and_interactive_for_adobe(monkeypatch):
     monkeypatch.setattr(worker_task, "is_windows", lambda: True)
+    monkeypatch.setattr(Path, "is_file", lambda _self: True)
     runner = Mock(return_value=Mock(returncode=0, stdout="ok", stderr=""))
     s = ClassSchedule(id="safeid", launch_adobe_connect=True)
     r = WorkerTaskScheduler(runner).register()
     assert r.success and "/IT" not in r.args
-    assert "schedule_worker.py" in " ".join(build_worker_command()) and "safeid" not in r.task_xml and WORKER_TASK_NAME
+    assert "src.scheduler_worker" in " ".join(build_worker_command()) and "safeid" not in r.task_xml and WORKER_TASK_NAME
     assert runner.call_args.kwargs.get("check") is False
 
 

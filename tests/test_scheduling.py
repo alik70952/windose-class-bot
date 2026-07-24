@@ -62,12 +62,12 @@ def test_windows_weekday_mapping():
 
 def test_single_worker_command_has_no_schedule_or_credential():
     cmd=build_worker_command()
-    assert WORKER_TASK_NAME == 'VadanaClassBot-Worker'
-    assert 'schedule_worker.py' in ' '.join(cmd) and 'password' not in ' '.join(cmd).lower()
+    assert WORKER_TASK_NAME == 'VadanaClassBotWorker'
+    assert 'src.scheduler_worker' in ' '.join(cmd) and 'password' not in ' '.join(cmd).lower()
 
 def test_config_migration_and_no_password(tmp_path: Path):
     p=tmp_path/'config.json'; p.write_text(json.dumps({'profile_name':'x','schedules':[{'class_name':'c','password':'secret'}]}),encoding='utf-8')
-    c=ConfigManager(p).load(); assert c.schedules[0].class_name=='c'
+    c=ConfigManager(p).load(); assert c.schedules == [] and c.scheduler_sqlite_migration_completed
     ConfigManager(p).save(c); assert 'secret' not in p.read_text(encoding='utf-8')
 
 def test_default_config_path_is_project_absolute():
@@ -111,11 +111,12 @@ def test_sanitize_error_url():
 
 def test_cli_fake_id(monkeypatch):
     from main import main
-    monkeypatch.setattr('sys.argv',['main.py','--run-schedule','fake'])
-    assert main()==1
+    with pytest.raises(SystemExit):
+        main(['--run-schedule','fake'])
 
 def test_task_scheduler_mock(monkeypatch):
     monkeypatch.setattr(worker_task, 'is_windows', lambda: True)
+    monkeypatch.setattr(Path, 'is_file', lambda _self: True)
     runner=Mock(return_value=Mock(returncode=0,stdout='ok',stderr=''))
     r=WorkerTaskScheduler(runner).register()
     assert r.success; assert runner.call_args[0][0][0]=='schtasks.exe'

@@ -1,17 +1,111 @@
 @echo off
-setlocal
+setlocal EnableExtensions
 cd /d "%~dp0"
 
-where python >nul 2>nul
-if errorlevel 1 (
-    echo Python 3.11 or newer is required.
-    exit /b 1
+set "NO_PAUSE=0"
+set "SKIP_BROWSER=0"
+if /I "%CI%"=="1" set "NO_PAUSE=1"
+
+:parse_args
+if "%~1"=="" goto args_done
+if /I "%~1"=="--no-pause" set "NO_PAUSE=1"
+if /I "%~1"=="--skip-browser" set "SKIP_BROWSER=1"
+shift
+goto parse_args
+:args_done
+
+set "VENV_DIR=.venv"
+set "VENV_PY=%VENV_DIR%\Scripts\python.exe"
+set "PYTHON_CMD="
+
+where py >nul 2>nul
+if not errorlevel 1 set "PYTHON_CMD=py -3"
+if not defined PYTHON_CMD (
+    where python >nul 2>nul
+    if not errorlevel 1 set "PYTHON_CMD=python"
+)
+if not defined PYTHON_CMD (
+    echo Python پیدا نشد. Python 3.11 یا جدیدتر را نصب کنید و گزینه Add Python to PATH را فعال کنید.
+    call :fail 1 "Python detection" & exit /b 1
 )
 
-python -m venv .venv
-call .venv\Scripts\activate.bat
-python -m pip install --upgrade pip
-pip install -r requirements.txt
-playwright install chrome
+echo Using Python launcher: %PYTHON_CMD%
+%PYTHON_CMD% --version
+if errorlevel 1 (call :fail 1 "Python version check" & exit /b 1)
+%PYTHON_CMD% -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)"
+if errorlevel 1 (
+    echo Python 3.11 or newer is required.
+    call :fail 1 "Python version requirement" & exit /b 1
+)
 
-echo Installation completed.
+if exist "%VENV_DIR%" if not exist "%VENV_PY%" (
+    echo Virtual environment exists but is incomplete or broken: "%VENV_DIR%"
+    echo Delete the "%VENV_DIR%" folder and run install.bat again to rebuild it.
+    call :fail 1 "Virtual environment validation" & exit /b 1
+)
+
+if not exist "%VENV_PY%" (
+    echo Creating virtual environment in "%VENV_DIR%"...
+    %PYTHON_CMD% -m venv "%VENV_DIR%"
+    if errorlevel 1 (call :fail 1 "Virtual environment creation" & exit /b 1)
+)
+
+"%VENV_PY%" --version
+if errorlevel 1 (call :fail 1 "Virtual environment Python check" & exit /b 1)
+
+"%VENV_PY%" -m pip install --upgrade pip setuptools wheel
+if errorlevel 1 (call :fail 1 "Upgrade pip setuptools wheel" & exit /b 1)
+
+if not exist "requirements.txt" (call :fail 1 "requirements.txt check" & exit /b 1)
+"%VENV_PY%" -m pip install -r "requirements.txt"
+if errorlevel 1 (call :fail 1 "Install requirements" & exit /b 1)
+
+if "%SKIP_BROWSER%"=="1" (
+    echo Skipping Playwright browser installation by request.
+) else (
+    echo Installing Google Chrome for Playwright because the project launches Playwright with channel="chrome".
+    "%VENV_PY%" -m playwright install chrome
+    if errorlevel 1 (call :fail 1 "Playwright Google Chrome installation" & exit /b 1)
+)
+
+call :check_chrome
+if errorlevel 1 (
+    echo Google Chrome was not found in common Windows install paths.
+    echo The app UI can start, but browser automation requires Google Chrome because channel="chrome" is used.
+    echo Install Google Chrome or run install.bat without --skip-browser.
+)
+
+"%VENV_PY%" -c "import customtkinter; import playwright; import keyring; import src.app"
+if errorlevel 1 (call :fail 1 "Startup import check" & exit /b 1)
+
+"%VENV_PY%" -m compileall "main.py" "src"
+if errorlevel 1 (call :fail 1 "compileall" & exit /b 1)
+
+"%VENV_PY%" -c "import importlib.util, sys; sys.exit(0 if importlib.util.find_spec('pytest') else 2)"
+if errorlevel 1 (
+    echo pytest is not installed; skipping tests.
+) else (
+    "%VENV_PY%" -m pytest -q
+    if errorlevel 1 (call :fail 1 "pytest" & exit /b 1)
+)
+
+echo Installation completed successfully.
+echo Run run.bat to start the application.
+if not "%NO_PAUSE%"=="1" pause
+exit /b 0
+
+:check_chrome
+if exist "%ProgramFiles%\Google\Chrome\Application\chrome.exe" exit /b 0
+if exist "%ProgramFiles(x86)%\Google\Chrome\Application\chrome.exe" exit /b 0
+if exist "%LocalAppData%\Google\Chrome\Application\chrome.exe" exit /b 0
+exit /b 1
+
+:fail
+echo.
+echo ERROR: Step failed: %~2
+echo Exit Code: %~1
+call :finish %~1
+
+:finish
+if not "%NO_PAUSE%"=="1" pause
+exit /b %~1

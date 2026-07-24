@@ -23,11 +23,13 @@ class WorkerProcessLock:
     def acquire(self) -> bool:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._file = self.path.open("a+b")
-        self._file.seek(0)
-        if self._file.read(1) == b"":
-            self._file.seek(0); self._file.write(b"0"); self._file.flush()
-        self._file.seek(0)
         try:
+            self._file.seek(0)
+            if self._file.read(1) == b"":
+                self._file.seek(0)
+                self._file.write(b"0")
+                self._file.flush()
+            self._file.seek(0)
             if sys.platform == "win32":
                 import msvcrt
                 msvcrt.locking(self._file.fileno(), msvcrt.LK_NBLCK, 1)
@@ -35,8 +37,9 @@ class WorkerProcessLock:
                 import fcntl
                 fcntl.flock(self._file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
             return True
-        except (OSError, IOError):
-            self._file.close(); self._file = None
+        except OSError:
+            self._file.close()
+            self._file = None
             return False
 
     def release(self) -> None:

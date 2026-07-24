@@ -80,6 +80,17 @@ def test_only_one_worker_holds_lock(tmp_path):
     first.release(); assert second.acquire(); second.release()
 
 
+def test_locked_file_read_is_treated_as_lock_contention(tmp_path, monkeypatch):
+    locked_file = Mock()
+    locked_file.read.side_effect = PermissionError
+    monkeypatch.setattr(Path, "open", Mock(return_value=locked_file))
+
+    lock = WorkerProcessLock(tmp_path / "worker.lock")
+
+    assert not lock.acquire()
+    locked_file.close.assert_called_once_with()
+
+
 def test_stale_heartbeat_is_not_healthy(tmp_path, monkeypatch):
     heartbeat, lock = tmp_path / "heartbeat.json", tmp_path / "lock"
     heartbeat.write_text(json.dumps({"pid": os.getpid(), "last_heartbeat_epoch": 1, "version": "2"}))

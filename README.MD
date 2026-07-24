@@ -1,29 +1,121 @@
 # Windows Class Bot
 
-A Windows desktop automation application for opening Google Chrome,
-logging into a configured website, entering an online class,
-and launching Adobe Connect.
+برنامه دسکتاپ ویندوزی برای آماده‌سازی اتوماسیون ورود به کلاس‌های آنلاین با رابط کاربری فارسی، Playwright و Google Chrome واقعی.
 
-## Status
+> وضعیت فعلی: فاز اول پیاده‌سازی شده است. در این فاز برنامه تنظیمات را ذخیره/بارگذاری می‌کند، رمز عبور را خارج از فایل JSON در Credential Manager/keyring نگه می‌دارد، و با Playwright سایت ورود را در Google Chrome باز می‌کند. مراحل واقعی ورود و انتخاب کلاس در فازهای بعدی با Selectorهای Playwright اضافه می‌شوند.
 
-The project is currently in its initial development stage.
+## امکانات فاز اول
 
-## Planned features
+- رابط گرافیکی فارسی، راست‌چین تا حد ممکن و Dark Mode با CustomTkinter
+- فیلدهای نام پروفایل، آدرس صفحه ورود، نام کاربری، رمز عبور، نام کلاس و آدرس اختیاری Adobe Connect
+- نمایش/مخفی کردن رمز عبور
+- گزینه‌های باز نگه‌داشتن مرورگر، Headless و ذخیره نشست مرورگر
+- دکمه‌های ذخیره تنظیمات، بارگذاری تنظیمات، آزمایش بازشدن سایت، شروع ربات و توقف ربات
+- اجرای عملیات مرورگر در Thread جداگانه برای جلوگیری از هنگ کردن رابط کاربری
+- ذخیره تنظیمات غیرحساس در `config.json`
+- ذخیره امن رمز عبور با `keyring` و Windows Credential Manager در ویندوز
+- جلوگیری از ورود `config.json` و نشست مرورگر به Git
 
-- Windows desktop user interface
-- Google Chrome automation with Playwright
-- Configurable website URL
-- Configurable automation steps
-- Secure credential storage
-- Saved browser login session
-- Online class selection
-- Adobe Connect launch support
-- Execution logs
-- Windows EXE build
+## ساختار پروژه
 
-## Security
+```text
+windows-class-bot/
+├── main.py
+├── requirements.txt
+├── config.example.json
+├── install.bat
+├── run.bat
+├── src/
+│   ├── app.py
+│   ├── browser/automation.py
+│   ├── config/manager.py
+│   ├── security/credentials.py
+│   ├── ui/main_window.py
+│   └── utils/logger.py
+└── README.MD
+```
 
-Do not commit passwords, cookies, browser profiles, or `config.json`
-to the repository.
+## پیش‌نیازها در Windows
 
-Use `config.example.json` as the configuration template.
+1. Windows 10 یا 11
+2. Python 3.11 یا جدیدتر
+3. دسترسی اینترنت برای نصب بسته‌ها و نصب Google Chrome از طریق Playwright
+
+## نصب
+
+در Command Prompt یا PowerShell داخل پوشه پروژه اجرا کنید:
+
+```bat
+install.bat
+```
+
+این فایل کارهای زیر را انجام می‌دهد:
+
+1. ساخت محیط مجازی `.venv`
+2. نصب وابستگی‌های `requirements.txt`
+3. اجرای دستور زیر برای نصب Google Chrome مورد استفاده Playwright:
+
+```bat
+playwright install chrome
+```
+
+اگر Google Chrome قبلاً روی سیستم نصب باشد، Playwright همچنان از `channel="chrome"` برای اجرای Chrome واقعی استفاده می‌کند.
+
+## اجرا
+
+پس از نصب، برنامه را با دستور زیر اجرا کنید:
+
+```bat
+run.bat
+```
+
+یا به صورت مستقیم:
+
+```bat
+.venv\Scripts\activate.bat
+python main.py
+```
+
+## روش استفاده در فاز اول
+
+1. برنامه را اجرا کنید.
+2. فیلدهای ضروری را وارد کنید:
+   - نام پروفایل
+   - آدرس صفحه ورود با `https://` یا `http://`
+   - نام کاربری
+   - رمز عبور
+   - نام کلاس
+3. در صورت نیاز گزینه‌های مرورگر را تغییر دهید.
+4. روی «ذخیره تنظیمات» کلیک کنید.
+5. برای بررسی مرورگر و سایت، روی «آزمایش بازشدن سایت» کلیک کنید.
+6. دکمه «شروع ربات» در فاز اول فقط سایت را باز می‌کند و برای توسعه مراحل ورود آماده شده است.
+7. برای بستن مرورگرِ بازمانده، روی «توقف ربات» کلیک کنید.
+
+## امنیت و فایل‌های محلی
+
+- رمز عبور داخل `config.json` ذخیره نمی‌شود.
+- رمز عبور با کتابخانه `keyring` در Credential Manager ویندوز یا backend امن سیستم ذخیره می‌شود.
+- فایل‌های زیر نباید Commit شوند و در `.gitignore` قرار دارند:
+  - `config.json`
+  - `browser-session/`
+  - `.credentials*`
+  - فایل‌های log
+- از وارد کردن URL واقعی دانشگاه، نام کاربری، رمز عبور یا اطلاعات شخصی در Repository خودداری کنید.
+
+## ساخت فایل EXE در آینده
+
+PyInstaller در وابستگی‌ها قرار دارد. پس از تکمیل فازهای بعدی می‌توان نمونه دستور زیر را استفاده کرد:
+
+```bat
+pyinstaller --noconsole --name WindowsClassBot main.py
+```
+
+ممکن است برای بسته‌بندی نهایی Playwright و فایل‌های مرورگر به تنظیمات تکمیلی نیاز باشد.
+
+## توسعه فازهای بعدی
+
+- تعریف مراحل ورود با Selectorهای Playwright
+- انتخاب کلاس بر اساس نام کلاس
+- اجرای Adobe Connect از URL یا برنامه نصب‌شده
+- مدیریت چند پروفایل
+- تست‌های خودکار و بسته‌بندی نهایی EXE

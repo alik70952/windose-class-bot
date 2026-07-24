@@ -1,6 +1,7 @@
 """Schedule management frame separated from automation logic."""
 from __future__ import annotations
 from datetime import datetime, timedelta
+import threading
 import uuid
 import customtkinter as ctk
 from src.classes.presets import CLASS_PRESETS, ClassPreset
@@ -153,23 +154,38 @@ class ScheduleFrame(ctk.CTkFrame):
                                  delay.days * 24 + delay.seconds // 3600,
                                  (delay.seconds % 3600) // 60, schedule_id=s.id)
         self.selected_id = s.id
-        result = ensure_scheduler_worker_running()
         self.logs.log(f"schedule_id: {s.id}")
-        current = self.store.get(item.id)
-        if result.success and current is not None and current.status == "pending":
-            self.logs.log("زمان‌بندی در SQLite ثبت شد و Heartbeat معتبر است.")
-            self.status_label.configure(text="تایم زمان‌بندی شما ثبت شد.")
-        else:
-            # Do not throw away the user's schedule just because Windows Task
-            # Scheduler (or its heartbeat check) is temporarily unavailable.
-            # It remains pending and will be picked up after the worker starts,
-            # including on the next app launch/logon.
-            self.logs.log(result.message)
-            self.status_label.configure(
-                text="زمان‌بندی ثبت شد، اما سرویس خودکار هنوز فعال نیست. "
-                     "install.bat را اجرا کنید. جزئیات خطا در گزارش ثبت شد."
-            )
-        self.refresh()
+        self.status_label.configure(text="زمان‌بندی ثبت شد؛ سرویس خودکار در پس‌زمینه بررسی می‌شود.")
+        # schtasks and its heartbeat check can take several seconds on Windows.
+        # Never perform that work in Tk's event thread: doing so made the Save
+        # button look frozen even though the SQLite insert had already worked.
+        threading.Thread(
+            target=self._check_worker_after_save,
+            args=(item.id,),
+            name="scheduler-save-health",
+            daemon=True,
+        ).start()
+
+    def _check_worker_after_save(self, schedule_id: str) -> None:
+        result = ensure_scheduler_worker_running()
+        current = self.store.get(schedule_id)
+        healthy = result.success and current is not None and current.status == "pending"
+
+        def update_ui() -> None:
+            if healthy:
+                self.logs.log("زمان‌بندی در SQLite ثبت شد و Heartbeat معتبر است.")
+                self.status_label.configure(text="تایم زمان‌بندی شما ثبت شد.")
+            else:
+                # The schedule remains pending and can be picked up after the
+                # worker starts, including on the next app launch/logon.
+                self.logs.log(result.message)
+                self.status_label.configure(
+                    text="زمان‌بندی ثبت شد، اما سرویس خودکار هنوز فعال نیست. "
+                         "install.bat را اجرا کنید. جزئیات خطا در گزارش ثبت شد."
+                )
+
+        # Tk widgets may only be touched by their owning (main) thread.
+        self.after(0, update_ui)
 
     def refresh(self):
         """Keep the schedule section free of lists, tables, and extra controls."""

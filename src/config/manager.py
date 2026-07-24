@@ -7,6 +7,7 @@ import uuid
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
+from src.scheduling.models import ClassSchedule
 
 CONFIG_PATH = Path("config.json")
 VADANA_PROFILE_NAME = "وادانا واحد ۳۹"
@@ -36,6 +37,7 @@ class AppConfig:
     site_adapter: str = ""
     profile_id: str = field(default_factory=lambda: uuid.uuid4().hex)
     browser: BrowserSettings = field(default_factory=BrowserSettings)
+    schedules: list[ClassSchedule] = field(default_factory=list)
 
 
 def default_vadana_profile() -> AppConfig:
@@ -70,6 +72,9 @@ class ConfigManager:
         """Write non-sensitive settings to disk in a readable JSON format."""
         data = asdict(config)
         data.pop("password", None)
+        for schedule in data.get("schedules", []):
+            if isinstance(schedule, dict):
+                schedule.pop("password", None)
         self.path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
     def _from_dict(self, data: dict[str, Any]) -> AppConfig:
@@ -83,6 +88,8 @@ class ConfigManager:
             site_adapter = VADANA_SITE_ADAPTER
             login_url = login_url or VADANA_LOGIN_URL
             profile_id = profile_id if profile_id != profile_name else "vadana-sum39"
+        schedules_data = data.get("schedules", []) if isinstance(data.get("schedules", []), list) else []
+        schedules = [ClassSchedule.from_dict(item) for item in schedules_data if isinstance(item, dict)]
         return AppConfig(
             profile_name=profile_name,
             login_url=login_url,
@@ -97,4 +104,5 @@ class ConfigManager:
                 save_session=bool(browser_data.get("save_session", False)),
                 session_dir=str(browser_data.get("session_dir", "browser-session")),
             ),
+            schedules=schedules,
         )

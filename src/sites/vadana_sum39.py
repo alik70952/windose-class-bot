@@ -181,3 +181,100 @@ class VadanaSum39Adapter(SiteAdapter):
     def _check_stop(stop_event: threading.Event) -> None:
         if stop_event.is_set():
             raise RuntimeError("عملیات توسط کاربر متوقف شد.")
+
+PERSIAN_DIGITS = str.maketrans({**{ord(a): b for a, b in zip("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789")}, ord("ي"): "ی", ord("ك"): "ک", ord("("): " ", ord(")"): " ", ord("\u200c"): " "})
+
+def normalize_persian_text(value: str) -> str:
+    """Normalize Persian/Arabic variants, whitespace, ZWNJ, parentheses, and digits."""
+    text = value.translate(PERSIAN_DIGITS).replace("ك", "ک").replace("ي", "ی")
+    text = text.replace("（", " ").replace("）", " ")
+    return re.sub(r"\s+", " ", text).strip()
+
+def sanitize_diagnostic(value: str) -> str:
+    """Remove token-like query strings from diagnostics."""
+    return re.sub(r"([?&](?:token|sid|session|key)=)[^&\s]+", r"\1...", value, flags=re.I)[:300]
+
+class CourseSelectionError(RuntimeError):
+    """Raised when a course cannot be selected safely."""
+
+# Methods are attached to keep compatibility with the existing adapter class definition.
+def _adapter_open_course(self: VadanaSum39Adapter, page, class_name: str, timeout_ms: int, stop_event: threading.Event):
+    """Open a course by exact normalized visible link text from the dashboard."""
+    self._check_stop(stop_event)
+    self.log("صفحه میزکار شناسایی شد")
+    try:
+        page.get_by_text("درس‌های من", exact=True).wait_for(state="visible", timeout=timeout_ms)
+    except Exception as exc:
+        raise CourseSelectionError("بخش درس‌های من پیدا نشد.") from exc
+    self.log("بخش درس‌های من پیدا شد")
+    self.log("در حال جست‌وجوی کلاس انتخاب‌شده")
+    target = normalize_persian_text(class_name)
+    links = page.locator("a")
+    matches: list[tuple[str, object]] = []
+    for index in range(links.count()):
+        self._check_stop(stop_event)
+        link = links.nth(index)
+        try:
+            text = link.inner_text(timeout=500).strip()
+        except Exception:
+            continue
+        if normalize_persian_text(text) == target:
+            matches.append((text, link))
+    if len(matches) == 1:
+        matches[0][1].click(timeout=timeout_ms); self.log("کلاس موردنظر پیدا شد")
+        self._verify_course_page(page, class_name, timeout_ms, stop_event); return page
+    if len(matches) > 1:
+        names = "، ".join(sorted({m[0] for m in matches})[:5])
+        raise CourseSelectionError(f"چند درس با نام مشابه پیدا شد: {names}")
+    similar = []
+    for index in range(links.count()):
+        try:
+            text = links.nth(index).inner_text(timeout=300).strip()
+            nt = normalize_persian_text(text)
+            if target in nt or nt in target: similar.append(text)
+        except Exception: pass
+    if similar:
+        raise CourseSelectionError("درس دقیق پیدا نشد. موارد مشابه فقط برای بررسی: " + "، ".join(similar[:5]))
+    raise CourseSelectionError("درس انتخاب‌شده پیدا نشد.")
+
+def _adapter_verify_course_page(self: VadanaSum39Adapter, page, class_name: str, timeout_ms: int, stop_event: threading.Event) -> bool:
+    """Verify opened page title before entering online class."""
+    self._check_stop(stop_event)
+    try: page.wait_for_load_state("domcontentloaded", timeout=timeout_ms)
+    except Exception: pass
+    self.log("صفحه درس باز شد")
+    target = normalize_persian_text(class_name)
+    for selector in ["h1", "h2", "[role='heading']", ".page-header-headings"]:
+        loc = page.locator(selector)
+        try:
+            for i in range(min(loc.count(), 5)):
+                text = loc.nth(i).inner_text(timeout=500)
+                if target in normalize_persian_text(text):
+                    self.log("عنوان درس تأیید شد"); return True
+        except Exception: continue
+    raise CourseSelectionError("عنوان صفحه درس با کلاس انتخاب‌شده تطبیق ندارد.")
+
+def _adapter_enter_online_class(self: VadanaSum39Adapter, page, class_name: str, timeout_ms: int, stop_event: threading.Event):
+    """Click the live 'ورود به کلاس' link and never the archive link."""
+    end = datetime.now().timestamp() + timeout_ms / 1000
+    logged = False
+    while datetime.now().timestamp() < end:
+        self._check_stop(stop_event)
+        try:
+            page.get_by_text("کلاس آنلاین", exact=True).wait_for(state="visible", timeout=1000)
+        except Exception: pass
+        candidates = [lambda: page.get_by_role("link", name="ورود به کلاس", exact=True).first, lambda: page.get_by_text("ورود به کلاس", exact=True).first]
+        for factory in candidates:
+            try:
+                link = factory(); txt = normalize_persian_text(link.inner_text(timeout=500))
+                if "آرشیو" not in txt and txt == normalize_persian_text("ورود به کلاس") and link.is_visible(timeout=500):
+                    link.click(timeout=timeout_ms); self.log("روی لینک ورود به کلاس کلیک شد"); return page
+            except Exception: continue
+        if not logged:
+            self.log("در انتظار فعال‌شدن لینک ورود به کلاس..."); logged = True
+        stop_event.wait(10)
+    raise CourseSelectionError("لینک ورود به کلاس در زمان مجاز فعال نشد.")
+
+VadanaSum39Adapter.open_course = _adapter_open_course  # type: ignore[attr-defined]
+VadanaSum39Adapter._verify_course_page = _adapter_verify_course_page  # type: ignore[attr-defined]
+VadanaSum39Adapter.enter_online_class = _adapter_enter_online_class  # type: ignore[attr-defined]

@@ -14,6 +14,7 @@ from src.browser.automation import BrowserAutomation
 from src.config.manager import AppConfig, BrowserSettings, ConfigManager, VADANA_SITE_ADAPTER
 from src.security.credentials import CredentialStore
 from src.utils.logger import UiLogQueue
+from src.ui.schedule_frame import ScheduleFrame
 
 
 class MainWindow(ctk.CTk):
@@ -91,6 +92,9 @@ class MainWindow(ctk.CTk):
         self.log_box = ctk.CTkTextbox(container, height=220, font=("Consolas", 12))
         self.log_box.pack(fill="both", expand=True)
         self.log_box.configure(state="disabled")
+
+        self.schedule_frame = ScheduleFrame(container, self.config_manager, self.logs)
+        self.schedule_frame.pack(fill="both", expand=False, pady=(12, 0))
 
     def _entry(self, parent: ctk.CTkFrame, label: str, show: str | None = None) -> ctk.CTkEntry:
         """Add a right-aligned label and entry pair."""

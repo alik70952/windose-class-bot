@@ -2,3 +2,4 @@ customtkinter==5.2.2
 keyring==25.6.0
 playwright==1.54.0
 pyinstaller==6.14.2
+pytest==8.4.1

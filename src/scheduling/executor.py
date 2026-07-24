@@ -2,6 +2,7 @@
 from __future__ import annotations
 import threading, time
 from datetime import datetime
+from pathlib import Path
 from typing import Callable
 from src.browser.automation import BrowserAutomation
 from src.config.manager import ConfigManager
@@ -9,6 +10,8 @@ from src.notifications import notify
 from src.scheduling.manager import ScheduleManager
 from src.scheduling.models import ClassSchedule
 from src.scheduling.profile_lock import ProfileLock
+from src.scheduling.time_utils import is_too_late_to_start
+from src.scheduling.windows_task_scheduler import WindowsTaskScheduler
 from src.sites.vadana_sum39 import CourseSelectionError, sanitize_diagnostic
 from src.security.credentials import CredentialStore
 
@@ -26,19 +29,28 @@ class ScheduleExecutor:
         self.config_manager = config_manager or ConfigManager()
         self.credentials = credentials or CredentialStore()
         self.log = log or (lambda message: print(message))
+    def _schedule_log(self, schedule_id: str, message: str) -> None:
+        Path("logs/schedules").mkdir(parents=True, exist_ok=True)
+        safe = "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in schedule_id)[:80]
+        with (Path("logs/schedules") / f"{safe}.log").open("a", encoding="utf-8") as fh:
+            fh.write(f"{datetime.now().isoformat(timespec='seconds')} {sanitize_diagnostic(message)}\n")
     def run(self, schedule_id: str, stop_event: threading.Event | None = None) -> bool:
         stop_event = stop_event or threading.Event()
         manager = ScheduleManager(self.config_manager)
         schedule = manager.get(schedule_id)
         if schedule is None:
             self.log("زمان‌بندی پیدا نشد."); return False
-        self.log("اجرای زمان‌بندی آغاز شد")
+        self.log("اجرای زمان‌بندی آغاز شد"); self._schedule_log(schedule.id, "اجرای زمان‌بندی آغاز شد")
+        if is_too_late_to_start(schedule):
+            msg = "زمان اجرای کلاس بیش از حد مجاز گذشته است و ربات وارد کلاس نشد."
+            self._finish(schedule, manager, "missed_schedule_too_late", msg); self.log(msg); self._schedule_log(schedule.id, msg); return False
         try:
-            with ProfileLock(schedule.profile_id):
+            with ProfileLock(schedule.id):
                 self.log("زمان محلی اجرا تأیید شد")
                 return self._run_with_retry(schedule, stop_event, manager)
         except Exception as exc:
-            self._finish(schedule, manager, "Failed", sanitize_diagnostic(str(exc)))
+            status = "already_running" if "در حال اجراست" in str(exc) else "Failed"
+            self._finish(schedule, manager, status, sanitize_diagnostic(str(exc)))
             notify("Windows Class Bot", schedule.last_error)
             return False
     def _run_with_retry(self, schedule: ClassSchedule, stop_event: threading.Event, manager: ScheduleManager) -> bool:
@@ -78,3 +90,6 @@ class ScheduleExecutor:
             schedule.enabled = False
         schedule.last_error = error
         manager.upsert(schedule)
+        self._schedule_log(schedule.id, f"status={schedule.last_run_status} error={error}")
+        if schedule.recurrence == "once" and schedule.last_run_status in {"Completed", "Failed"}:
+            WindowsTaskScheduler().delete(schedule.id)

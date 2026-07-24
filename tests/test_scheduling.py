@@ -116,3 +116,73 @@ def test_task_scheduler_mock(monkeypatch):
     r=WindowsTaskScheduler(runner).register(ClassSchedule(id='abc', weekday='شنبه'))
     assert r.success; assert runner.call_args[0][0][0]=='schtasks.exe'
     d=WindowsTaskScheduler(runner).delete('abc'); assert d.success
+
+from datetime import datetime
+from src.scheduling.time_utils import convert_12h_to_24h, convert_24h_to_12h, next_run_datetime, is_too_late_to_start, adjusted_weekday
+
+
+def test_12h_to_24h_required_edges():
+    assert convert_12h_to_24h(12,0,'AM') == '00:00'
+    assert convert_12h_to_24h(12,0,'PM') == '12:00'
+    assert convert_12h_to_24h(1,0,'PM') == '13:00'
+    assert convert_12h_to_24h(11,59,'PM') == '23:59'
+
+
+def test_24h_to_12h_required_edges():
+    assert convert_24h_to_12h('00:00') == ('12','00','AM')
+    assert convert_24h_to_12h('12:30') == ('12','30','PM')
+    assert convert_24h_to_12h('13:30') == ('01','30','PM')
+
+
+def test_invalid_12h_ui_parts_rejected():
+    with pytest.raises(ValueError): convert_12h_to_24h(0,0,'AM')
+    with pytest.raises(ValueError): convert_12h_to_24h(13,0,'AM')
+    with pytest.raises(ValueError): convert_12h_to_24h(12,0,'NOON')
+
+
+def test_noon_and_midnight_effective_task_times(monkeypatch):
+    monkeypatch.setattr('os.name','nt')
+    runner=Mock(return_value=Mock(returncode=0,stdout='TaskName: WindowsClassBot_noon\nEnabled: Yes\nnoon',stderr=''))
+    s=ClassSchedule(id='noon', start_time=convert_12h_to_24h(12,0,'PM'), early_minutes=0)
+    r=WindowsTaskScheduler(runner).register(s)
+    assert r.success and s.effective_run_time == '12:00'
+    s2=ClassSchedule(id='midnight', start_time=convert_12h_to_24h(12,0,'AM'), early_minutes=0)
+    WindowsTaskScheduler(runner).register(s2)
+    assert s2.effective_run_time == '00:00'
+
+
+def test_weekly_next_run_and_day_rollover():
+    now=datetime(2026,7,19,10,0)  # Sunday
+    nxt=next_run_datetime('weekly','یکشنبه','', '12:00', 10, now)
+    assert nxt.strftime('%Y-%m-%d %H:%M') == '2026-07-19 11:50'
+    assert actual_run_time('00:05',10)==('23:55',-1)
+    assert adjusted_weekday('دوشنبه', -1) == 'یکشنبه'
+
+
+def test_once_past_rejected_by_next_run_check():
+    assert next_run_datetime('once','یکشنبه','2026-07-19','12:00',0, datetime(2026,7,20,1,0)) < datetime(2026,7,20,1,0)
+
+
+def test_start_when_available_and_command_schedule_id(monkeypatch):
+    monkeypatch.setattr('os.name','nt')
+    calls=[]
+    def runner(args, **kwargs):
+        calls.append(args)
+        return Mock(returncode=0, stdout='Enabled: Yes\nsafeid', stderr='')
+    s=ClassSchedule(id='safeid', start_time='13:30', early_minutes=15)
+    r=WindowsTaskScheduler(runner).register(s)
+    assert r.success and s.effective_run_time == '13:15'
+    xml_path=calls[0][calls[0].index('/XML')+1]
+    assert '--run-schedule' in ' '.join(build_run_command('safeid'))
+    assert 'password' not in ' '.join(calls[0]).lower()
+
+
+def test_late_start_limit():
+    s=ClassSchedule(recurrence='once', date='2026-07-24', start_time='12:00', early_minutes=0, max_late_start_minutes=15)
+    assert not is_too_late_to_start(s, datetime(2026,7,24,12,7))
+    assert is_too_late_to_start(s, datetime(2026,7,24,12,45))
+
+
+def test_two_minute_temporary_schedule_model():
+    s=ClassSchedule(id='tmp', temporary=True, recurrence='once', date='2026-07-24', start_time='10:42', early_minutes=0)
+    assert s.temporary and '--run-schedule' in build_run_command('tmp')

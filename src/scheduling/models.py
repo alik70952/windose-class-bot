@@ -25,8 +25,13 @@ class ClassSchedule:
     class_name: str = ""
     weekday: str = "یکشنبه"
     start_time: str = "09:15"
+    class_start_time: str = "09:15"
+    effective_run_time: str = "09:10"
+    task_time: str = "09:10"
     end_time: str = "12:15"
     early_minutes: int = 5
+    max_late_start_minutes: int = 15
+    temporary: bool = False
     recurrence: Recurrence = "weekly"
     enabled: bool = True
     keep_browser_open: bool = True
@@ -75,6 +80,8 @@ class ClassSchedule:
         """Serialize without credentials."""
         data = asdict(self)
         data.pop("password", None)
+        if not data.get("class_start_time"):
+            data["class_start_time"] = data.get("start_time", "09:15")
         return data
 
     @classmethod
@@ -82,4 +89,10 @@ class ClassSchedule:
         """Load schedule with defaults for forward/backward compatibility."""
         allowed = {f.name for f in cls.__dataclass_fields__.values()}  # type: ignore[attr-defined]
         clean = {k: v for k, v in data.items() if k in allowed and k != "password"}
-        return cls(**clean)
+        if "start_time" in clean and "class_start_time" not in clean:
+            clean["class_start_time"] = clean["start_time"]
+        obj = cls(**clean)
+        from src.scheduling.time_utils import actual_run_time
+        obj.effective_run_time, _ = actual_run_time(obj.start_time, obj.early_minutes)
+        obj.task_time = obj.effective_run_time
+        return obj

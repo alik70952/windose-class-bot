@@ -24,8 +24,11 @@ class ScheduleFrame(ctk.CTkFrame):
         self.delay_hours_var = ctk.StringVar(value="0")
         self.delay_minutes_var = ctk.StringVar(value="5")
         self._build()
+        self.delay_hours_var.trace_add("write", self._update_preview)
+        self.delay_minutes_var.trace_add("write", self._update_preview)
         self.prefill_for_class(CLASS_PRESETS[0], log=False)
         self.refresh()
+        self._update_preview()
 
     def _build(self):
         ctk.CTkLabel(self, text="زمان‌بندی ساده اجرای ربات", font=("Tahoma", 18, "bold"), anchor="e").pack(fill="x", pady=(8, 4))
@@ -45,7 +48,23 @@ class ScheduleFrame(ctk.CTkFrame):
         ctk.CTkLabel(form, text="چند دقیقه دیگر:", anchor="e").grid(row=0, column=0, sticky="e", padx=8, pady=(8, 2))
         self.minutes_entry.grid(row=1, column=0, sticky="ew", padx=8, pady=(0, 8))
 
-        ctk.CTkButton(self, text="اجرا", command=self.save).pack(anchor="e", padx=8, pady=6)
+        quick = ctk.CTkFrame(self, fg_color="transparent")
+        quick.pack(fill="x", padx=8, pady=(0, 4))
+        ctk.CTkLabel(quick, text="انتخاب سریع:", anchor="e").pack(side="right", padx=(8, 0))
+        for minutes in (5, 15, 30, 60):
+            label = "۱ ساعت" if minutes == 60 else f"{minutes} دقیقه"
+            ctk.CTkButton(
+                quick,
+                text=label,
+                width=76,
+                height=28,
+                fg_color=("#68707c", "#3b414b"),
+                command=lambda value=minutes: self._set_quick_delay(value),
+            ).pack(side="right", padx=3)
+
+        self.preview_label = ctk.CTkLabel(self, text="", anchor="e", font=("Tahoma", 12, "bold"), text_color="#4da3ff")
+        self.preview_label.pack(fill="x", padx=8, pady=(4, 2))
+        ctk.CTkButton(self, text="ثبت زمان‌بندی", command=self.save, height=38).pack(anchor="e", padx=8, pady=6)
 
         self.status_label = ctk.CTkLabel(self, text="هنوز زمان‌بندی ثبت نشده است.", anchor="e", font=("Tahoma", 11), wraplength=760)
         self.status_label.pack(fill="x", padx=8, pady=(4, 10))
@@ -69,6 +88,26 @@ class ScheduleFrame(ctk.CTkFrame):
         if hours < 0 or minutes < 0 or minutes > 59 or (hours == 0 and minutes == 0):
             return None
         return timedelta(hours=hours, minutes=minutes)
+
+    def _set_quick_delay(self, minutes: int) -> None:
+        """Fill the delay fields from a common, mistake-resistant shortcut."""
+        hours, remaining_minutes = divmod(minutes, 60)
+        self.delay_hours_var.set(str(hours))
+        self.delay_minutes_var.set(str(remaining_minutes))
+
+    def _update_preview(self, *_args) -> None:
+        """Show the concrete local run time before the user saves anything."""
+        if not getattr(self, "preview_label", None):
+            return
+        delay = self._delay()
+        if delay is None:
+            self.preview_label.configure(text="زمان اجرای معتبر را وارد کنید.", text_color="#ef6461")
+            return
+        when = datetime.now() + delay
+        self.preview_label.configure(
+            text=f"زمان تقریبی اجرا روی همین رایانه: {when:%Y/%m/%d  %H:%M}",
+            text_color="#4da3ff",
+        )
 
     def _schedule_from_form(self):
         delay = self._delay()

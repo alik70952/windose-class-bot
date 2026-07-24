@@ -9,7 +9,8 @@ from typing import Callable
 from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import sync_playwright
 
-from src.config.manager import BrowserSettings
+from src.config.manager import AppConfig, BrowserSettings
+from src.sites import get_adapter
 
 LogCallback = Callable[[str], None]
 
@@ -20,6 +21,50 @@ class BrowserAutomation:
     def __init__(self, log: LogCallback, stop_event: threading.Event | None = None) -> None:
         self.log = log
         self.stop_event = stop_event or threading.Event()
+
+
+    def login_to_site(self, config: AppConfig, password: str, timeout_ms: int = 60_000) -> bool:
+        """Run a site-adapter login in real Chrome without exposing credentials."""
+        self.log("در حال آماده‌سازی Google Chrome...")
+        try:
+            adapter = get_adapter(config.site_adapter)
+            with sync_playwright() as playwright:
+                if config.browser.save_session:
+                    context = playwright.chromium.launch_persistent_context(
+                        user_data_dir=str(Path(config.browser.session_dir)),
+                        channel="chrome",
+                        headless=config.browser.headless,
+                    )
+                    page = context.new_page() if not context.pages else context.pages[0]
+                    browser = None
+                else:
+                    browser = playwright.chromium.launch(channel="chrome", headless=config.browser.headless)
+                    context = browser.new_context()
+                    page = context.new_page()
+
+                self.log("نام کاربری دریافت شد")
+                self.log("رمز عبور از Windows Credential Manager دریافت شد" if password else "رمز عبور از رابط کاربری دریافت شد")
+                result = adapter.login(page, config.username, password, timeout_ms, self.stop_event)
+
+                if config.browser.keep_open and not config.browser.headless and result.success and not self.stop_event.is_set():
+                    self.log("مرورگر باز می‌ماند. برای توقف از دکمه توقف ربات استفاده کنید.")
+                    while not self.stop_event.wait(0.5):
+                        if page.is_closed():
+                            break
+
+                context.close()
+                if browser is not None:
+                    browser.close()
+                if result.success:
+                    self.log("مرورگر بسته شد." if not config.browser.keep_open else "عملیات ورود پایان یافت.")
+                else:
+                    self.log(result.message)
+                return result.success
+        except PlaywrightError as exc:
+            self.log(f"خطای مرورگر: {exc}")
+        except Exception as exc:  # noqa: BLE001 - keep the desktop app alive on unexpected errors.
+            self.log(f"خطای پیش‌بینی‌نشده: {exc}")
+        return False
 
     def open_site(self, url: str, settings: BrowserSettings) -> bool:
         """Open a URL in real Google Chrome and report success without crashing the app."""

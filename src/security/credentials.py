@@ -4,24 +4,33 @@ from __future__ import annotations
 
 import keyring
 
-SERVICE_NAME = "WindowsClassBot"
+SERVICE_NAME = "windows-class-bot"
 
 
 class CredentialStore:
     """Store and retrieve passwords without writing them to config.json."""
 
-    def get_password(self, profile_name: str, username: str) -> str:
-        """Return a saved password for the profile and username, if available."""
-        if not profile_name or not username:
+    def get_password(self, profile_id: str, username: str = "") -> str:
+        """Return a saved password for the stable profile id, if available."""
+        if not profile_id:
             return ""
-        return keyring.get_password(SERVICE_NAME, self._account(profile_name, username)) or ""
+        return keyring.get_password(SERVICE_NAME, self._account(profile_id)) or ""
 
-    def save_password(self, profile_name: str, username: str, password: str) -> None:
+    def save_password(self, profile_id: str, username: str, password: str) -> None:
         """Save a password in Windows Credential Manager or keyring backend."""
-        if profile_name and username and password:
-            keyring.set_password(SERVICE_NAME, self._account(profile_name, username), password)
+        if profile_id and password:
+            keyring.set_password(SERVICE_NAME, self._account(profile_id), password)
+
+    def delete_password(self, profile_id: str) -> None:
+        """Delete a saved profile password when it exists."""
+        if not profile_id:
+            return
+        try:
+            keyring.delete_password(SERVICE_NAME, self._account(profile_id))
+        except keyring.errors.PasswordDeleteError:
+            return
 
     @staticmethod
-    def _account(profile_name: str, username: str) -> str:
-        """Build a stable keyring account name for a profile."""
-        return f"{profile_name}:{username}"
+    def _account(profile_id: str) -> str:
+        """Build a stable keyring account name that survives profile renames."""
+        return f"windows-class-bot:{profile_id}"

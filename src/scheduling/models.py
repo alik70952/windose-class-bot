@@ -13,6 +13,7 @@ RUN_STATUS_LABELS: dict[str, str] = {
     "OpeningCourse": "بازکردن درس", "WaitingForClass": "انتظار کلاس",
     "EnteringClass": "ورود به کلاس", "LaunchingAdobeConnect": "اجرای Adobe Connect",
     "Success": "موفق", "Failed": "ناموفق", "Stopped": "متوقف‌شده", "NeedsUserAction": "نیازمند اقدام کاربر",
+    "already_running": "در حال اجرا", "missed_schedule_too_late": "از دست‌رفته", "Completed": "تکمیل‌شده",
 }
 
 @dataclass(slots=True)
@@ -27,6 +28,10 @@ class ClassSchedule:
     start_time: str = "09:15"
     end_time: str = "12:15"
     early_minutes: int = 5
+    effective_run_time: str = ""
+    effective_day_offset: int = 0
+    max_late_start_minutes: int = 15
+    is_test: bool = False
     recurrence: Recurrence = "weekly"
     enabled: bool = True
     keep_browser_open: bool = True
@@ -72,14 +77,30 @@ class ClassSchedule:
         return self.last_run_status
 
     def to_dict(self) -> dict[str, Any]:
-        """Serialize without credentials."""
+        """Serialize without credentials; times are canonical 24-hour local Windows times."""
+        self.recalculate_effective_time()
         data = asdict(self)
         data.pop("password", None)
         return data
+
+    @property
+    def class_start_time(self) -> str:
+        return self.start_time
+
+    @property
+    def task_time(self) -> str:
+        self.recalculate_effective_time()
+        return self.effective_run_time
+
+    def recalculate_effective_time(self) -> None:
+        from src.scheduling.time_utils import actual_run_time
+        self.effective_run_time, self.effective_day_offset = actual_run_time(self.start_time, self.early_minutes)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "ClassSchedule":
         """Load schedule with defaults for forward/backward compatibility."""
         allowed = {f.name for f in cls.__dataclass_fields__.values()}  # type: ignore[attr-defined]
         clean = {k: v for k, v in data.items() if k in allowed and k != "password"}
-        return cls(**clean)
+        item = cls(**clean)
+        item.recalculate_effective_time()
+        return item

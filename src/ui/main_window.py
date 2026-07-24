@@ -27,8 +27,9 @@ class MainWindow(ctk.CTk):
         ctk.set_default_color_theme("blue")
 
         self.title("ربات ورود به کلاس آنلاین")
-        self.geometry("900x760")
-        self.minsize(780, 680)
+        self.geometry("980x780")
+        self.minsize(720, 560)
+        self.resizable(True, True)
 
         self.config_manager = ConfigManager()
         self.credentials = CredentialStore()
@@ -49,11 +50,15 @@ class MainWindow(ctk.CTk):
 
     def _build_ui(self) -> None:
         """Create the form, actions, and log panel."""
-        container = ctk.CTkFrame(self)
-        container.pack(fill="both", expand=True, padx=24, pady=24)
+        header = ctk.CTkFrame(self)
+        header.pack(fill="x", padx=24, pady=(18, 8))
+        title = ctk.CTkLabel(header, text="ربات ورود به کلاس آنلاین", font=("Tahoma", 24, "bold"), anchor="e")
+        title.pack(fill="x")
 
-        title = ctk.CTkLabel(container, text="ربات ورود به کلاس آنلاین", font=("Tahoma", 24, "bold"), anchor="e")
-        title.pack(fill="x", pady=(0, 18))
+        container = ctk.CTkScrollableFrame(self, orientation="vertical")
+        container.pack(fill="both", expand=True, padx=24, pady=(0, 18))
+        self.scrollable_container = container
+        self._bind_mousewheel(container)
 
         self.profile_entry = self._entry(container, "نام پروفایل *")
         self.url_entry = self._entry(container, "آدرس صفحه ورود *")
@@ -99,7 +104,7 @@ class MainWindow(ctk.CTk):
         self.log_box.configure(state="disabled")
 
         self.schedule_frame = ScheduleFrame(container, self.config_manager, self.logs)
-        self.schedule_frame.pack(fill="both", expand=False, pady=(12, 0))
+        self.schedule_frame.pack(fill="both", expand=False, pady=(12, 24))
 
     def _entry(self, parent: ctk.CTkFrame, label: str, show: str | None = None) -> ctk.CTkEntry:
         """Add a right-aligned label and entry pair."""
@@ -130,8 +135,19 @@ class MainWindow(ctk.CTk):
         ctk.CTkLabel(card, text=f"روز کلاس: {preset.weekday}", anchor="e", font=("Tahoma", 12)).grid(row=1, column=2, sticky="e", padx=10, pady=2)
         ctk.CTkLabel(card, text=f"ساعت کلاس: {preset.start_time} تا {preset.end_time}", anchor="e", font=("Tahoma", 12)).grid(row=1, column=1, sticky="e", padx=10, pady=2)
         ctk.CTkButton(card, text="ورود همین حالا", command=lambda p=preset: self.enter_preset_now(p)).grid(row=0, column=0, sticky="ew", padx=8, pady=(8, 2))
-        ctk.CTkButton(card, text="انتخاب", command=lambda name=preset.name: self.select_class(name), width=80).grid(row=1, column=0, sticky="ew", padx=8, pady=(2, 8))
+        ctk.CTkButton(card, text="زمان‌بندی این کلاس", command=lambda p=preset: self.schedule_preset(p), width=120).grid(row=1, column=0, sticky="ew", padx=8, pady=(2, 8))
         self.class_cards[preset.name] = card
+
+    def _bind_mousewheel(self, widget) -> None:
+        def _wheel(event):
+            try:
+                delta = -1 * int(event.delta / 120) if getattr(event, "delta", 0) else (1 if getattr(event, "num", 0) == 5 else -1)
+                self.scrollable_container._parent_canvas.yview_scroll(delta, "units")
+            except Exception:
+                pass
+        self.bind_all("<MouseWheel>", _wheel)
+        self.bind_all("<Button-4>", _wheel)
+        self.bind_all("<Button-5>", _wheel)
 
     def select_class(self, class_name: str) -> None:
         """Select exactly one fixed class and mirror it to the hidden class field."""
@@ -146,6 +162,15 @@ class MainWindow(ctk.CTk):
             self.config_manager.save(self._settings_from_ui())
         except Exception:
             pass
+
+    def schedule_preset(self, preset: ClassPreset) -> None:
+        self.select_class(preset.name)
+        if getattr(self, "schedule_frame", None):
+            self.schedule_frame.prefill_for_class(preset)
+            try:
+                self.scrollable_container._parent_canvas.yview_moveto(0.55)
+            except Exception:
+                pass
 
     def _toggle_class_picker_visibility(self, config: AppConfig) -> None:
         is_vadana = config.site_adapter == VADANA_SITE_ADAPTER or config.profile_name == VADANA_PROFILE_NAME
@@ -287,7 +312,7 @@ class MainWindow(ctk.CTk):
         if not password:
             self._show_error("رمز عبور وارد یا در Windows Credential Manager ذخیره نشده است.")
             return
-        self._run_full_class_flow(config, password, schedule.launch_adobe_connect if schedule else True, (schedule.class_entry_timeout_seconds * 1000) if schedule else 900_000)
+        self._run_full_class_flow(config, password, schedule.launch_adobe_connect if schedule else True, (schedule.class_entry_timeout_seconds * 1000) if schedule else 900_000, schedule.adobe_launch_wait_seconds if schedule else 20)
 
     def enter_preset_now(self, preset: ClassPreset) -> None:
         """Select a fixed class, save it, and immediately run the full manual flow."""
@@ -300,7 +325,7 @@ class MainWindow(ctk.CTk):
         if not password:
             self._show_error("رمز عبور وارد یا در Windows Credential Manager ذخیره نشده است.")
             return
-        self._run_full_class_flow(config, password, True, 900_000)
+        self._run_full_class_flow(config, password, True, 900_000, 20)
 
     def _get_or_save_password(self, config: AppConfig) -> str:
         password = self.password_entry.get() or self.credentials.get_password(config.profile_id, config.username)
@@ -347,7 +372,7 @@ class MainWindow(ctk.CTk):
         self.worker = threading.Thread(target=worker, daemon=True)
         self.worker.start()
 
-    def _run_full_class_flow(self, config: AppConfig, password: str, launch_adobe_connect: bool, timeout_ms: int) -> None:
+    def _run_full_class_flow(self, config: AppConfig, password: str, launch_adobe_connect: bool, timeout_ms: int, adobe_launch_wait_seconds: int = 20) -> None:
         """Run the shared full class flow in a worker thread."""
         if self.worker and self.worker.is_alive():
             self._show_error("اجرای دیگری در حال انجام است.")
@@ -357,7 +382,7 @@ class MainWindow(ctk.CTk):
         automation = BrowserAutomation(self.logs.log, self.stop_event)
         def worker() -> None:
             try:
-                automation.login_and_enter_class(config, password, timeout_ms, launch_adobe_connect)
+                automation.login_and_enter_class(config, password, timeout_ms, launch_adobe_connect, adobe_launch_wait_seconds)
             finally:
                 self.logs.log("WORKER_FINISHED")
         self.worker = threading.Thread(target=worker, daemon=True)

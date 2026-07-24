@@ -261,9 +261,11 @@ def _adapter_verify_course_page(self: VadanaSum39Adapter, page, class_name: str,
     raise CourseSelectionError("عنوان صفحه درس با کلاس انتخاب‌شده تطبیق ندارد.")
 
 def _adapter_enter_online_class(self: VadanaSum39Adapter, page, class_name: str, timeout_ms: int, stop_event: threading.Event):
-    """Click the live 'ورود به کلاس' link and never the archive link."""
+    """Wait for and click the exact live 'ورود به کلاس' link, never archive."""
     end = datetime.now().timestamp() + timeout_ms / 1000
-    logged = False
+    self.log("صفحه درس باز شد؛ ربات منتظر فعال‌شدن لینک ورود به کلاس است.")
+    self.log("در حال بررسی لینک ورود به کلاس")
+    last_summary = 0.0
     while datetime.now().timestamp() < end:
         self._check_stop(stop_event)
         try:
@@ -274,12 +276,26 @@ def _adapter_enter_online_class(self: VadanaSum39Adapter, page, class_name: str,
             try:
                 link = factory(); txt = normalize_persian_text(link.inner_text(timeout=500))
                 if "آرشیو" not in txt and txt == normalize_persian_text("ورود به کلاس") and link.is_visible(timeout=500):
-                    link.click(timeout=timeout_ms); self.log("روی لینک ورود به کلاس کلیک شد"); return page
+                    self.log("لینک ورود به کلاس فعال شد")
+                    try:
+                        with page.context.expect_page(timeout=3000) as new_page_info:
+                            link.click(timeout=timeout_ms)
+                        new_page = new_page_info.value
+                        self.log("Tab یا Popup جلسه بررسی شد")
+                        return new_page
+                    except Exception:
+                        link.click(timeout=timeout_ms)
+                        self.log("درخواست ورود به کلاس ارسال شد")
+                        return page
             except Exception: continue
-        if not logged:
-            self.log("در انتظار فعال‌شدن لینک ورود به کلاس..."); logged = True
-        stop_event.wait(10)
-    raise CourseSelectionError("لینک ورود به کلاس در زمان مجاز فعال نشد.")
+        now = datetime.now().timestamp()
+        if now - last_summary >= 60 or last_summary == 0.0:
+            self.log("لینک ورود هنوز فعال نیست")
+            last_summary = now
+        remaining = max(0.0, end - datetime.now().timestamp())
+        if stop_event.wait(min(15, remaining)):
+            raise CourseSelectionError("عملیات توسط کاربر متوقف شد.")
+    raise CourseSelectionError("مهلت انتظار تمام شد و لینک ورود به کلاس فعال نشد.")
 
 VadanaSum39Adapter.open_course = _adapter_open_course  # type: ignore[attr-defined]
 VadanaSum39Adapter._verify_course_page = _adapter_verify_course_page  # type: ignore[attr-defined]

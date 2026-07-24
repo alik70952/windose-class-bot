@@ -32,8 +32,10 @@ class ScheduleExecutor:
         schedule = manager.get(schedule_id)
         if schedule is None:
             self.log("زمان‌بندی پیدا نشد."); return False
+        self.log("اجرای زمان‌بندی آغاز شد")
         try:
             with ProfileLock(schedule.profile_id):
+                self.log("زمان محلی اجرا تأیید شد")
                 return self._run_with_retry(schedule, stop_event, manager)
         except Exception as exc:
             self._finish(schedule, manager, "Failed", sanitize_diagnostic(str(exc)))
@@ -62,13 +64,17 @@ class ScheduleExecutor:
         password = self.credentials.get_password(config.profile_id, config.username)
         if not password:
             raise ValueError("رمز ذخیره‌شده در Windows Credential Manager پیدا نشد.")
+        self.log("اطلاعات حساب از Credential Manager دریافت شد")
+        self.log("کلاس زمان‌بندی‌شده دریافت شد")
         config.class_name = schedule.class_name
         config.browser.keep_open = schedule.keep_browser_open
         config.browser.save_session = schedule.save_session
         automation = BrowserAutomation(self.log, stop_event)
-        return automation.login_and_enter_class(config, password, schedule.class_entry_timeout_seconds * 1000, schedule.launch_adobe_connect)
+        return automation.login_and_enter_class(config, password, schedule.class_entry_timeout_seconds * 1000, schedule.launch_adobe_connect, schedule.adobe_launch_wait_seconds)
     def _finish(self, schedule: ClassSchedule, manager: ScheduleManager, status: str, error: str) -> None:
         schedule.last_run_at = datetime.now().isoformat(timespec="seconds")
-        schedule.last_run_status = status
+        schedule.last_run_status = "Completed" if status == "Success" and schedule.recurrence == "once" else status
+        if status == "Success" and schedule.recurrence == "once":
+            schedule.enabled = False
         schedule.last_error = error
         manager.upsert(schedule)

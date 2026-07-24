@@ -3,6 +3,7 @@ import threading, time
 from unittest.mock import Mock
 from src.browser.adobe_connect import AdobeConnectLauncher
 from src.scheduling.models import ClassSchedule
+import src.scheduling.windows_task_scheduler as windows_task_scheduler
 from src.scheduling.windows_task_scheduler import WindowsTaskScheduler, build_run_command
 from src.sites.vadana_sum39 import VadanaSum39Adapter, CourseSelectionError
 from src.classes.presets import CLASS_PRESETS
@@ -17,7 +18,7 @@ def test_schedule_model_requested_fields_no_password():
 
 
 def test_task_uses_schedule_id_and_interactive_for_adobe(monkeypatch):
-    monkeypatch.setattr("os.name", "nt")
+    monkeypatch.setattr(windows_task_scheduler, "is_windows", lambda: True)
     runner = Mock(return_value=Mock(returncode=0, stdout="ok", stderr=""))
     s = ClassSchedule(id="safeid", launch_adobe_connect=True)
     r = WindowsTaskScheduler(runner).register(s)

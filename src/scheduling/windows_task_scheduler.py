@@ -1,8 +1,8 @@
 """Safe Windows Task Scheduler wrapper using XML and argument lists only."""
 from __future__ import annotations
-import os, re, subprocess, sys, tempfile, xml.etree.ElementTree as ET
+import re, subprocess, sys, tempfile, xml.etree.ElementTree as ET
 from dataclasses import dataclass
-from pathlib import PosixPath
+from pathlib import Path
 from src.scheduling.models import ClassSchedule
 from src.scheduling.time_utils import effective_for_date, effective_for_weekday, next_run_datetime, windows_weekday
 
@@ -10,7 +10,8 @@ from src.scheduling.time_utils import effective_for_date, effective_for_weekday,
 class TaskResult:
     success: bool; message: str; args: list[str]; task_xml: str = ""
 
-def project_root() -> PosixPath: return PosixPath(__file__).resolve().parents[2]
+def is_windows() -> bool: return sys.platform == "win32"
+def project_root() -> Path: return Path(__file__).resolve().parents[2]
 def sanitize_task_name(schedule_id: str) -> str:
     return f"WindowsClassBot_{(re.sub(r'[^A-Za-z0-9_-]', '_', schedule_id)[:64] or 'schedule')}"
 def build_run_command(schedule_id: str, executable: str | None = None, script: str | None = None) -> list[str]:
@@ -49,17 +50,17 @@ class WindowsTaskScheduler:
         if schedule.recurrence == "weekly": schedule.effective_run_time, schedule.effective_run_weekday = effective_for_weekday(schedule.weekday, schedule.class_start_time or schedule.start_time, schedule.early_minutes)
         elif schedule.date: schedule.effective_run_time, schedule.effective_run_date = effective_for_date(schedule.date, schedule.class_start_time or schedule.start_time, schedule.early_minutes)
         xml = build_task_xml(schedule); task = sanitize_task_name(schedule.id)
-        if os.name != "nt": return TaskResult(False, "ثبت Task فقط روی Windows قابل اجراست.", ["schtasks.exe","/Create","/XML","<xml>","/TN",task], xml)
+        if not is_windows(): return TaskResult(False, "ثبت Task فقط روی Windows قابل اجراست.", ["schtasks.exe","/Create","/XML","<xml>","/TN",task], xml)
         with tempfile.NamedTemporaryFile("w", suffix=".xml", delete=False, encoding="utf-16") as f: f.write(xml); path=f.name
         args=["schtasks.exe","/Create","/F","/TN",task,"/XML",path] + (["/IT"] if schedule.launch_adobe_connect else [])
         c=self.runner(args,capture_output=True,text=True,check=False)
         return TaskResult(c.returncode==0, c.stderr.strip() or c.stdout.strip() or "Task ثبت شد.", args, xml)
     def verify(self, schedule: ClassSchedule) -> TaskResult:
-        if os.name != "nt": return TaskResult(False, "بررسی Task فقط روی Windows قابل اجراست.", [], build_task_xml(schedule))
+        if not is_windows(): return TaskResult(False, "بررسی Task فقط روی Windows قابل اجراست.", [], build_task_xml(schedule))
         args=["schtasks.exe","/Query","/TN",sanitize_task_name(schedule.id),"/XML"]
         c=self.runner(args,capture_output=True,text=True,check=False)
         return TaskResult(c.returncode==0, c.stderr.strip() or c.stdout.strip(), args)
     def delete(self, schedule_id: str) -> TaskResult:
-        if os.name != "nt": return TaskResult(False, "حذف Task فقط روی Windows قابل اجراست.", [])
+        if not is_windows(): return TaskResult(False, "حذف Task فقط روی Windows قابل اجراست.", [])
         args=["schtasks.exe","/Delete","/F","/TN",sanitize_task_name(schedule_id)]; c=self.runner(args,capture_output=True,text=True,check=False)
         return TaskResult(c.returncode==0, c.stderr.strip() or c.stdout.strip() or "Task حذف شد.", args)

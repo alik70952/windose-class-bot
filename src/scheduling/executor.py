@@ -11,7 +11,6 @@ from src.scheduling.models import ClassSchedule
 from src.scheduling.profile_lock import ProfileLock
 from src.scheduling.schedule_lock import ScheduleLock
 from src.scheduling.time_utils import next_run_datetime
-from src.scheduling.windows_task_scheduler import WindowsTaskScheduler
 from src.sites.vadana_sum39 import CourseSelectionError, sanitize_diagnostic
 from src.security.credentials import CredentialStore
 
@@ -52,8 +51,6 @@ class ScheduleExecutor:
                 with ProfileLock(schedule.profile_id):
                     self._safe_log(schedule, "زمان محلی اجرا تأیید شد")
                     ok = self._run_with_retry(schedule, stop_event, manager)
-                    if schedule.test_schedule:
-                        WindowsTaskScheduler().delete(schedule.id)
                     return ok
         except RuntimeError as exc:
             if str(exc) == "already_running":
@@ -109,6 +106,5 @@ class ScheduleExecutor:
         schedule.last_run_status = "Completed" if status == "Success" and schedule.recurrence == "once" else status
         if status == "Success" and schedule.recurrence == "once":
             schedule.enabled = False; schedule.completed = True
-            WindowsTaskScheduler().delete(schedule.id)
         schedule.last_error = error
         manager.upsert(schedule)

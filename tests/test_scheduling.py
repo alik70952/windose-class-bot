@@ -7,8 +7,8 @@ from src.classes import CLASS_PRESETS
 from src.config.manager import CONFIG_PATH, PROJECT_ROOT, ConfigManager, default_vadana_profile
 from src.scheduling.models import ClassSchedule
 from src.scheduling.time_utils import actual_run_time, validate_time, windows_weekday
-import src.scheduling.windows_task_scheduler as windows_task_scheduler
-from src.scheduling.windows_task_scheduler import build_run_command, sanitize_task_name, WindowsTaskScheduler
+import src.scheduling.worker_task as worker_task
+from src.scheduling.worker_task import build_worker_command, WorkerTaskScheduler, WORKER_TASK_NAME
 from src.scheduling.executor import should_retry
 from src.scheduling.profile_lock import ProfileLock
 from src.sites.vadana_sum39 import CourseSelectionError, normalize_persian_text, sanitize_diagnostic, VadanaSum39Adapter
@@ -60,11 +60,10 @@ def test_validate_time():
 def test_windows_weekday_mapping():
     assert windows_weekday('یکشنبه')=='SUN'
 
-def test_safe_task_name_and_command_has_no_credential():
-    s='abc; شماره 123'; name=sanitize_task_name(s)
-    assert name.startswith('WindowsClassBot_') and ';' not in name and 'شماره' not in name
-    cmd=build_run_command('fake-id')
-    assert 'scheduled_runner.py' in ' '.join(cmd) and cmd[-1] == 'fake-id' and 'password' not in ' '.join(cmd).lower()
+def test_single_worker_command_has_no_schedule_or_credential():
+    cmd=build_worker_command()
+    assert WORKER_TASK_NAME == 'VadanaClassBot-Worker'
+    assert 'schedule_worker.py' in ' '.join(cmd) and 'password' not in ' '.join(cmd).lower()
 
 def test_config_migration_and_no_password(tmp_path: Path):
     p=tmp_path/'config.json'; p.write_text(json.dumps({'profile_name':'x','schedules':[{'class_name':'c','password':'secret'}]}),encoding='utf-8')
@@ -116,8 +115,8 @@ def test_cli_fake_id(monkeypatch):
     assert main()==1
 
 def test_task_scheduler_mock(monkeypatch):
-    monkeypatch.setattr(windows_task_scheduler, 'is_windows', lambda: True)
+    monkeypatch.setattr(worker_task, 'is_windows', lambda: True)
     runner=Mock(return_value=Mock(returncode=0,stdout='ok',stderr=''))
-    r=WindowsTaskScheduler(runner).register(ClassSchedule(id='abc', weekday='شنبه'))
+    r=WorkerTaskScheduler(runner).register()
     assert r.success; assert runner.call_args[0][0][0]=='schtasks.exe'
-    d=WindowsTaskScheduler(runner).delete('abc'); assert d.success
+    assert WORKER_TASK_NAME in runner.call_args[0][0]

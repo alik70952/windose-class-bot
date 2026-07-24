@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import uuid
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -73,13 +74,16 @@ class ConfigManager:
         return self._from_dict(data)
 
     def save(self, config: AppConfig) -> None:
-        """Write non-sensitive settings to disk in a readable JSON format."""
+        """Atomically write settings so the worker never reads partial JSON."""
         data = asdict(config)
         data.pop("password", None)
         for schedule in data.get("schedules", []):
             if isinstance(schedule, dict):
                 schedule.pop("password", None)
-        self.path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = self.path.with_name(f".{self.path.name}.{uuid.uuid4().hex}.tmp")
+        temporary.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        os.replace(temporary, self.path)
 
     def _from_dict(self, data: dict[str, Any]) -> AppConfig:
         """Build a config object from current or legacy JSON without secrets."""

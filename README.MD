@@ -157,17 +157,17 @@ Presetها فقط مقدار اولیه هستند. کاربر می‌تواند
 
 فیلد «چند دقیقه قبل از شروع وارد شود» زمان اجرای واقعی را از ساعت شروع کم می‌کند. مقدار پیش‌فرض 5 دقیقه است؛ برای مثال 09:15 با ورود 5 دقیقه زودتر در 09:10 اجرا می‌شود. اگر محاسبه به روز قبل برسد، برنامه offset روز قبل را نمایش و برای ثبت زمان اجرا از ساعت محلی استفاده می‌کند.
 
-### ثبت در Windows Task Scheduler
+### Worker دائمی زمان‌بندی
 
-برای اجرای زمان‌بندی حتی وقتی رابط اصلی باز نیست، برنامه روی Windows از `schtasks.exe` با `subprocess` و آرگومان‌های List استفاده می‌کند و از `shell=True` استفاده نمی‌کند. Task با نام امن `WindowsClassBot_<schedule_id>` ساخته می‌شود و نام خام کلاس، نام کاربری، رمز عبور، Cookie یا Token در نام Task یا Command Line قرار نمی‌گیرد.
+برنامه برای هر کلاس Windows Task جداگانه نمی‌سازد. فقط یک Task ثابت با نام `VadanaClassBot-Worker` هنگام نصب یا ذخیره زمان‌بندی، به‌صورت idempotent ثبت می‌شود. Trigger آن ورود کاربر به Windows است و Windows در صورت Crash، Worker را با فاصله یک دقیقه دوباره اجرا می‌کند.
 
-Task مستقیماً Runner همگام و مستقل را با Python بدون پنجره اجرا می‌کند؛ این مسیر رابط گرافیکی و `main.py` را Import نمی‌کند:
+Task، Worker مستقل از رابط گرافیکی را با Python بدون پنجره اجرا می‌کند:
 
 ```powershell
-.venv\Scripts\pythonw.exe src\scheduled_runner.py <schedule_id>
+.venv\Scripts\pythonw.exe src\schedule_worker.py
 ```
 
-حذف زمان‌بندی از UI، رکورد محلی را حذف می‌کند. حذف از Windows Task Scheduler نیز Task متناظر با schedule_id امن را حذف می‌کند. اگر ثبت یا حذف Task به سطح دسترسی بیشتر نیاز داشته باشد، برنامه پیام فارسی خوانا ثبت می‌کند و نباید Crash کند.
+Worker هر ۱۵ ثانیه Scheduleهای فعال را از `config.json` می‌خواند، موارد رسیده را در Thread مستقل اجرا می‌کند و پس از پایان هر اجرا زنده می‌ماند. حذف زمان‌بندی فقط رکورد محلی را حذف می‌کند و Task ثابت Worker دست‌نخورده می‌ماند. قفل Process مانع اجرای دو Worker هم‌زمان می‌شود و قفل هر Schedule/Profile نیز از اجرای تکراری جلوگیری می‌کند.
 
 ### اجرای آزمایشی و ورود به صفحه درس
 
@@ -222,6 +222,6 @@ git diff --check
 1. کلاس: `12:00 PM`، ورود زودتر: `0` دقیقه، زمان Task: `12:00 ظهر`.
 2. کلاس: `12:00 PM`، ورود زودتر: `10` دقیقه، زمان Task: `11:50 AM`.
 3. کلاس: `12:00 AM`، ورود زودتر: `10` دقیقه، زمان Task: `روز قبل، 11:50 PM`.
-4. زمان‌بندی دو دقیقه‌ای یک Task واقعی Windows با مسیر `pythonw.exe src\scheduled_runner.py <schedule_id>` ثبت می‌کند؛ می‌توانید برنامه را ببندید و در زمان اجرا هیچ پنجره CMD نمایش داده نمی‌شود. Runner سپس Chrome را باز می‌کند، Credential را از Windows Credential Manager می‌خواند، وارد وادانا می‌شود، کلاس ثابت انتخاب‌شده را باز می‌کند و مسیر Adobe Connect را اجرا می‌کند.
+4. زمان‌بندی دو دقیقه‌ای فقط در Config ذخیره می‌شود؛ Worker زنده آن را در موعد مقرر می‌بیند و Chrome را بدون نیاز به بازبودن رابط اجرا می‌کند.
 
-Taskهای Windows با XML امن ساخته می‌شوند: `InteractiveToken` برای اجرای Chrome در نشست کاربر، `StartWhenAvailable=true`، `WakeToRun=true`، `MultipleInstancesPolicy=IgnoreNew`، اجرای مجاز روی باتری، عدم توقف هنگام تغییر به باتری، محدودیت اجرای حدود دو ساعت، Retry تا سه مرتبه با فاصله یک دقیقه، فرمان جدا از آرگومان‌ها، و `WorkingDirectory` برابر ریشه پروژه. Action مستقیماً `pythonw.exe` محیط مجازی را روی `src/scheduled_runner.py` اجرا می‌کند و فقط `schedule_id` امن را می‌فرستد؛ Password، Cookie، Token یا URL کامل جلسه در Task، XML، Command یا Log ذخیره نمی‌شود. خطاهای Bootstrap که پیش از Executor رخ دهند در `logs/scheduled-runner-error.log` ثبت می‌شوند.
+Task ثابت Worker با XML امن ساخته می‌شود: `InteractiveToken` برای اجرای Chrome در نشست کاربر، `LogonTrigger`، `StartWhenAvailable=true`، `MultipleInstancesPolicy=IgnoreNew`، اجرای مجاز روی باتری، بدون محدودیت زمانی، و `RestartOnFailure`. Action هیچ `schedule_id`، Password، Cookie، Token یا URL جلسه‌ای ندارد. خطاهای Worker در `logs/schedule-worker.log` ثبت می‌شوند.

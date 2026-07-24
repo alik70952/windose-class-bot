@@ -5,10 +5,10 @@ import re
 import pytest
 from src.scheduling.models import ClassSchedule
 from src.scheduling.time_utils import convert_12h_to_24h, convert_24h_to_12h, actual_run_time, effective_for_weekday, next_run_datetime, format_12h
-import src.scheduling.windows_task_scheduler as windows_task_scheduler
-from src.scheduling.windows_task_scheduler import WindowsTaskScheduler, build_task_xml, build_run_command, format_run_command, project_root
+import src.scheduling.worker_task as worker_task
+from src.scheduling.worker_task import WorkerTaskScheduler, WORKER_TASK_NAME, build_worker_task_xml, build_worker_command, format_run_command, project_root
 from src.scheduling.schedule_lock import ScheduleLock
-from src import scheduled_runner
+from src import schedule_worker
 
 @pytest.mark.parametrize('h,m,p,out', [(12,0,'AM','00:00'),(12,0,'PM','12:00'),(1,0,'PM','13:00'),(11,59,'PM','23:59'),(12,30,'AM','00:30')])
 def test_12_to_24(h,m,p,out): assert convert_12h_to_24h(h,m,p)==out
@@ -22,16 +22,16 @@ def test_early_and_previous_day():
     assert actual_run_time('00:05',10)==('23:55',-1)
     assert effective_for_weekday('دوشنبه','00:05',10)==('23:55','یکشنبه')
 def test_task_uses_effective_time_and_settings(monkeypatch):
-    monkeypatch.setattr(windows_task_scheduler, 'is_windows', lambda: True)
+    monkeypatch.setattr(worker_task, 'is_windows', lambda: True)
     runner=Mock(return_value=Mock(returncode=0,stdout='ok',stderr=''))
     s=ClassSchedule(id='abc', class_start_time='12:00', start_time='12:00', early_minutes=10, launch_adobe_connect=True)
-    r=WindowsTaskScheduler(runner).register(s)
-    assert r.success and s.effective_run_time=='11:50'
+    r=WorkerTaskScheduler(runner).register()
+    assert r.success
     assert 'StartWhenAvailable' in r.task_xml and 'true' in r.task_xml
     assert 'MultipleInstancesPolicy' in r.task_xml and 'IgnoreNew' in r.task_xml
     assert 'InteractiveToken' in r.task_xml
     assert str(project_root()) in r.task_xml
-    assert 'scheduled_runner.py' in r.task_xml and 'abc' in r.task_xml
+    assert 'schedule_worker.py' in r.task_xml and 'abc' not in r.task_xml and '<LogonTrigger>' in r.task_xml
     assert 'password' not in r.task_xml.lower()
 def test_weekly_next_run_future():
     s=ClassSchedule(recurrence='weekly', effective_run_time='09:15', effective_run_weekday='یکشنبه')
@@ -51,31 +51,18 @@ def test_display_and_storage_formats():
     s=ClassSchedule(class_start_time=convert_12h_to_24h('12','00','PM'))
     assert s.class_start_time=='12:00' and format_12h(s.class_start_time)=='12:00 PM'
 def test_command_credential_free():
-    cmd=build_run_command('sid')
-    assert cmd[-1] == 'sid' and 'scheduled_runner.py' in cmd[-2] and not any('password' in p.lower() for p in cmd)
+    cmd=build_worker_command()
+    assert 'schedule_worker.py' in cmd[-1] and not any('password' in p.lower() for p in cmd)
 
 def test_windows_command_quotes_project_paths():
-    cmd = build_run_command('schedule-id', executable=r'C:\Program Files\Python\python.exe', script=r'C:\Class Bot\main.py')
+    cmd = build_worker_command(executable=r'C:\Program Files\Python\python.exe', script=r'C:\Class Bot\schedule_worker.py')
     rendered = format_run_command(cmd)
-    assert rendered == r'"C:\Program Files\Python\python.exe" "C:\Class Bot\main.py" schedule-id'
-    xml = build_task_xml(ClassSchedule(id='schedule-id'))
+    assert rendered == r'"C:\Program Files\Python\python.exe" "C:\Class Bot\schedule_worker.py"'
+    xml = build_worker_task_xml()
     assert '<WorkingDirectory>' in xml and str(project_root()) in xml
-def test_am_pm_task_changes():
-    am=ClassSchedule(id='a', class_start_time=convert_12h_to_24h(12,0,'AM'), start_time='00:00')
-    pm=ClassSchedule(id='p', class_start_time=convert_12h_to_24h(12,0,'PM'), start_time='12:00')
-    assert '00:00' in build_task_xml(am) and '12:00' in build_task_xml(pm)
-def test_test_schedule_cleanup_flag():
-    s=ClassSchedule(test_schedule=True, id='test_schedule_1')
-    assert s.test_schedule and s.id.startswith('test_schedule')
-
-def test_scheduled_runner_is_synchronous_and_returns_executor_status(monkeypatch):
-    run = Mock(return_value=True)
-    monkeypatch.setattr('src.scheduling.executor.ScheduleExecutor.run', run)
-    assert scheduled_runner.main(['schedule-42']) == 0
-    run.assert_called_once_with('schedule-42')
-
-def test_scheduled_runner_rejects_missing_or_extra_id():
-    with pytest.raises(ValueError):
-        scheduled_runner.main([])
-    with pytest.raises(ValueError):
-        scheduled_runner.main(['one', 'two'])
+def test_worker_task_is_singleton():
+    xml = build_worker_task_xml()
+    assert WORKER_TASK_NAME == "VadanaClassBot-Worker"
+    assert "schedule_worker.py" in xml
+    assert "RestartOnFailure" in xml
+    assert "ExecutionTimeLimit>PT0S" in xml

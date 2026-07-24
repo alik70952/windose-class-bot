@@ -38,6 +38,18 @@ def build_worker_command(executable: str | None = None, script: str | None = Non
     return [executable or str(pythonw), "-m", "src.scheduler_worker"]
 
 
+def _worker_executable() -> Path:
+    """Use the windowless venv interpreter, with the active venv as a fallback."""
+    configured = Path(build_worker_command()[0])
+    if configured.is_file():
+        return configured
+    active = Path(sys.executable)
+    if active.is_file() and active.name.lower() in {"python.exe", "pythonw.exe"}:
+        windowless = active.with_name("pythonw.exe")
+        return windowless if windowless.is_file() else active
+    return configured
+
+
 def format_run_command(command: list[str]) -> str:
     return subprocess.list2cmdline(command)
 
@@ -124,17 +136,20 @@ class WorkerTaskScheduler:
         return TaskResult(completed.returncode == 0, completed.stderr.strip() or completed.stdout.strip(), args)
 
 
-def _detached_start() -> bool:
+def _detached_start() -> TaskResult:
     if not is_windows():
-        return False
-    pythonw = build_worker_command()[0]
+        return TaskResult(False, "اجرای مستقیم Worker فقط روی Windows قابل اجراست.", [])
+    executable = _worker_executable()
+    args = [str(executable), "-m", "src.scheduler_worker"]
+    if not executable.is_file():
+        return TaskResult(False, f"مفسر Python برای Worker پیدا نشد: {executable}", args)
     try:
-        subprocess.Popen([pythonw, "-m", "src.scheduler_worker"], cwd=project_root(),
+        subprocess.Popen(args, cwd=project_root(),
                          creationflags=(subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS |
                                         subprocess.CREATE_NEW_PROCESS_GROUP), close_fds=True)
-        return True
-    except OSError:
-        return False
+        return TaskResult(True, "Worker مستقیماً در نشست فعلی اجرا شد.", args)
+    except OSError as exc:
+        return TaskResult(False, f"اجرای مستقیم Worker ناموفق بود: {exc}", args)
 
 
 def ensure_scheduler_worker_running(timeout: float = 10.0,
@@ -147,14 +162,20 @@ def ensure_scheduler_worker_running(timeout: float = 10.0,
     if not verified.success:
         verified = scheduler.register()
     started = scheduler.start() if verified.success else verified
+    fallback = None
     if not started.success:
-        _detached_start()
+        fallback = _detached_start()
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if worker_is_healthy():
             return TaskResult(True, "Worker با Heartbeat معتبر فعال است.", started.args, verified.task_xml)
         sleep(0.25)
-    return TaskResult(False, "سرویس اجرای خودکار راه‌اندازی نشد.", started.args, verified.task_xml)
+    reasons = [value for value in (started.message, fallback.message if fallback else "") if value]
+    detail = " | ".join(reasons)
+    message = "سرویس اجرای خودکار راه‌اندازی نشد."
+    if detail:
+        message = f"{message} جزئیات: {detail}"
+    return TaskResult(False, message, (fallback.args if fallback else started.args), verified.task_xml)
 
 
 WorkerTaskScheduler.ensure_running = lambda self: ensure_scheduler_worker_running(scheduler=self)  # compatibility

@@ -84,7 +84,7 @@ class ConfigManager:
         login_url = str(data.get("login_url", ""))
         site_adapter = str(data.get("site_adapter", ""))
         profile_id = str(data.get("profile_id", "")) or uuid.uuid4().hex
-        if profile_name == VADANA_PROFILE_NAME or login_url == VADANA_LOGIN_URL or site_adapter == VADANA_SITE_ADAPTER:
+        if profile_name == VADANA_PROFILE_NAME or login_url == VADANA_LOGIN_URL or "vadana-sum39.ec.iau.ir" in login_url or site_adapter == VADANA_SITE_ADAPTER:
             site_adapter = VADANA_SITE_ADAPTER
             login_url = login_url or VADANA_LOGIN_URL
             profile_id = profile_id if profile_id != profile_name else "vadana-sum39"

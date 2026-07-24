@@ -8,8 +8,14 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable
 
-from playwright.sync_api import Error as PlaywrightError
-from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+try:
+    from playwright.sync_api import Error as PlaywrightError
+    from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+except ModuleNotFoundError:  # pragma: no cover - lets unit tests run without browser deps.
+    class PlaywrightError(Exception):
+        pass
+    class PlaywrightTimeoutError(TimeoutError):
+        pass
 
 from src.sites.base import LoginResult, SiteAdapter
 

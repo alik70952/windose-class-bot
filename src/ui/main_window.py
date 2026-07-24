@@ -84,9 +84,12 @@ class MainWindow(ctk.CTk):
             ("حذف رمز ذخیره‌شده", self.delete_saved_password),
             ("پاک‌کردن نشست", self.clear_browser_session),
         ]
+        self.action_buttons = []
         for index, (text, command) in enumerate(button_specs):
             buttons.grid_columnconfigure(index, weight=1)
-            ctk.CTkButton(buttons, text=text, command=command).grid(row=0, column=index, padx=5, pady=8, sticky="ew")
+            button = ctk.CTkButton(buttons, text=text, command=command)
+            button.grid(row=0, column=index, padx=5, pady=8, sticky="ew")
+            self.action_buttons.append(button)
 
         ctk.CTkLabel(container, text="گزارش اجرا", font=("Tahoma", 16, "bold"), anchor="e").pack(fill="x", pady=(10, 4))
         self.log_box = ctk.CTkTextbox(container, height=220, font=("Consolas", 12))
@@ -115,7 +118,7 @@ class MainWindow(ctk.CTk):
             username=self.username_entry.get().strip(),
             class_name=self.class_entry.get().strip(),
             adobe_connect_url=self.adobe_entry.get().strip(),
-            site_adapter=VADANA_SITE_ADAPTER if "وادانا" in self.profile_entry.get() else "",
+            site_adapter=VADANA_SITE_ADAPTER if ("وادانا" in self.profile_entry.get() or "vadana-sum39.ec.iau.ir" in self.url_entry.get()) else "",
             profile_id=self.current_profile_id or "vadana-sum39",
             browser=BrowserSettings(
                 headless=self.headless_var.get(),
@@ -202,10 +205,32 @@ class MainWindow(ctk.CTk):
         self._run_vadana_login(config, password)
 
     def start_bot(self) -> None:
-        """Start phase-one bot behavior: open the site for future login steps."""
-        config = self._validate(require_class=True)
-        if config is not None:
-            self._run_browser(config.login_url, config.browser, "شروع ربات: سایت باز می‌شود.")
+        """Start the full end-to-end class automation flow."""
+        if self.worker and self.worker.is_alive():
+            self._show_error("اجرای دیگری در حال انجام است.")
+            return
+        config = self._validate(require_class=False)
+        if config is None:
+            return
+        schedule = self.schedule_frame.manager.get(self.schedule_frame.selected_id) if getattr(self, "schedule_frame", None) and self.schedule_frame.selected_id else None
+        if schedule and schedule.class_name:
+            config.class_name = schedule.class_name
+            config.browser.keep_open = schedule.keep_browser_open
+            config.browser.save_session = schedule.save_session
+        if not config.class_name:
+            self._show_error("ابتدا یک کلاس یا زمان‌بندی را انتخاب کنید.")
+            return
+        if config.site_adapter != VADANA_SITE_ADAPTER:
+            self._show_error("Site Adapter پشتیبانی نمی‌شود.")
+            return
+        if not config.username:
+            self._show_error("نام کاربری خالی است.")
+            return
+        password = self.password_entry.get() or self.credentials.get_password(config.profile_id, config.username)
+        if not password:
+            self._show_error("رمز عبور وارد یا در Windows Credential Manager ذخیره نشده است.")
+            return
+        self._run_full_class_flow(config, password, schedule.launch_adobe_connect if schedule else True, (schedule.class_entry_timeout_seconds * 1000) if schedule else 900_000)
 
     def delete_saved_password(self) -> None:
         """Delete the saved password for the stable active profile id."""
@@ -235,9 +260,31 @@ class MainWindow(ctk.CTk):
             self._show_error("یک عملیات در حال اجرا است. ابتدا آن را متوقف کنید.")
             return
         self.stop_event.clear()
+        self._set_running(True)
         self.logs.log("آزمایش ورود به وادانا شروع شد.")
         automation = BrowserAutomation(self.logs.log, self.stop_event)
-        self.worker = threading.Thread(target=automation.login_to_site, args=(config, password), daemon=True)
+        def worker() -> None:
+            try:
+                automation.login_to_site(config, password)
+            finally:
+                self.logs.log("WORKER_FINISHED")
+        self.worker = threading.Thread(target=worker, daemon=True)
+        self.worker.start()
+
+    def _run_full_class_flow(self, config: AppConfig, password: str, launch_adobe_connect: bool, timeout_ms: int) -> None:
+        """Run the shared full class flow in a worker thread."""
+        if self.worker and self.worker.is_alive():
+            self._show_error("اجرای دیگری در حال انجام است.")
+            return
+        self.stop_event.clear()
+        self._set_running(True)
+        automation = BrowserAutomation(self.logs.log, self.stop_event)
+        def worker() -> None:
+            try:
+                automation.login_and_enter_class(config, password, timeout_ms, launch_adobe_connect)
+            finally:
+                self.logs.log("WORKER_FINISHED")
+        self.worker = threading.Thread(target=worker, daemon=True)
         self.worker.start()
 
     def _run_browser(self, url: str, settings: BrowserSettings, start_message: str) -> None:
@@ -246,10 +293,21 @@ class MainWindow(ctk.CTk):
             self._show_error("یک عملیات در حال اجرا است. ابتدا آن را متوقف کنید.")
             return
         self.stop_event.clear()
+        self._set_running(True)
         self.logs.log(start_message)
         automation = BrowserAutomation(self.logs.log, self.stop_event)
-        self.worker = threading.Thread(target=automation.open_site, args=(url, settings), daemon=True)
+        def worker() -> None:
+            try:
+                automation.open_site(url, settings)
+            finally:
+                self.logs.log("WORKER_FINISHED")
+        self.worker = threading.Thread(target=worker, daemon=True)
         self.worker.start()
+
+    def _set_running(self, running: bool) -> None:
+        state = "disabled" if running else "normal"
+        for button in getattr(self, "action_buttons", []):
+            button.configure(state=state)
 
     def _show_error(self, message: str) -> None:
         """Display and log a recoverable error."""
@@ -259,6 +317,9 @@ class MainWindow(ctk.CTk):
     def _poll_logs(self) -> None:
         """Move queued worker logs into the textbox from the UI thread."""
         for message in self.logs.drain():
+            if message == "WORKER_FINISHED":
+                self._set_running(False)
+                continue
             self.log_box.configure(state="normal")
             self.log_box.insert("end", message + "\n")
             self.log_box.see("end")

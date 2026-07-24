@@ -6,11 +6,19 @@ import threading
 from pathlib import Path
 from typing import Callable
 
-from playwright.sync_api import Error as PlaywrightError
-from playwright.sync_api import sync_playwright
+try:
+    from playwright.sync_api import Error as PlaywrightError
+    from playwright.sync_api import sync_playwright
+except ModuleNotFoundError:  # pragma: no cover - lets unit tests run without browser deps.
+    class PlaywrightError(Exception):
+        pass
+    def sync_playwright():
+        raise PlaywrightError("Playwright نصب نیست.")
 
 from src.config.manager import AppConfig, BrowserSettings
+from src.config.manager import VADANA_LOGIN_URL, VADANA_SITE_ADAPTER
 from src.sites import get_adapter
+from src.sites.vadana_sum39 import sanitize_diagnostic
 
 LogCallback = Callable[[str], None]
 
@@ -68,40 +76,131 @@ class BrowserAutomation:
 
 
     def login_and_enter_class(self, config: AppConfig, password: str, timeout_ms: int = 900_000, launch_adobe_connect: bool = True) -> bool:
-        """Login if needed, open the selected course, and click the live class link."""
-        self.log("در حال آماده‌سازی Google Chrome...")
+        """Run the full Vadana class flow; opening a URL alone is never success."""
+        self.log("اجرای کامل ربات آغاز شد")
+        self._validate_full_flow_inputs(config, password)
+        self.log("Profile فعال بارگذاری شد")
+        self.log("کلاس انتخاب‌شده دریافت شد")
+        context = None
+        browser = None
+        active_page = None
         try:
             adapter = get_adapter(config.site_adapter)
+            adapter.log = self.log
             with sync_playwright() as playwright:
+                self.log("Chrome در حال اجرا است")
                 if config.browser.save_session:
-                    context = playwright.chromium.launch_persistent_context(user_data_dir=str(Path(config.browser.session_dir)), channel="chrome", headless=config.browser.headless)
+                    context = playwright.chromium.launch_persistent_context(
+                        user_data_dir=str(Path(config.browser.session_dir)),
+                        channel="chrome",
+                        headless=config.browser.headless,
+                    )
                     page = context.new_page() if not context.pages else context.pages[0]
-                    browser = None
                 else:
                     browser = playwright.chromium.launch(channel="chrome", headless=config.browser.headless)
-                    context = browser.new_context(); page = context.new_page()
-                self.log("OpeningDashboard")
-                page.goto(config.login_url, wait_until="domcontentloaded", timeout=60_000)
-                if "/login/index.php" in page.url:
-                    self.log("LoggingIn")
-                    result = adapter.login(page, config.username, password, 60_000, self.stop_event)
-                    if not result.success: raise RuntimeError(result.message)
-                self.log("FindingCourse")
+                    context = browser.new_context()
+                    page = context.new_page()
+
+                self._check_stop()
+                self.log("در حال بررسی نشست ورود")
+                logged_in = self._ensure_login_state(page, adapter, config, password)
+                if not logged_in:
+                    raise RuntimeError("ورود به وادانا انجام نشد.")
+
+                self._check_stop()
                 adapter.open_course(page, config.class_name, 60_000, self.stop_event)
-                self.log("EnteringClass")
+                self._check_stop()
+                self.log("در حال بررسی لینک ورود به کلاس")
                 active_page = adapter.enter_online_class(page, config.class_name, timeout_ms, self.stop_event)
-                if launch_adobe_connect:
-                    self.log("LaunchingAdobeConnect")
+                self.log("درخواست ورود به کلاس ارسال شد")
+
+                if launch_adobe_connect and config.adobe_connect_url:
+                    self.log("در صورت نیاز Adobe Connect توسط لینک کلاس یا آدرس تنظیم‌شده باز می‌شود")
+                    active_page.goto(config.adobe_connect_url, wait_until="domcontentloaded", timeout=60_000)
+
                 if config.browser.keep_open and not config.browser.headless and not self.stop_event.is_set():
-                    self.log("مرورگر باز می‌ماند.")
+                    self.log("مرورگر باز می‌ماند. برای توقف از دکمه توقف ربات استفاده کنید.")
                     while not self.stop_event.wait(0.5):
-                        if active_page.is_closed(): break
-                context.close()
-                if browser is not None: browser.close()
+                        if active_page.is_closed():
+                            break
+
+                self.log("جریان کامل ربات با موفقیت انجام شد")
                 return True
         except Exception as exc:
-            self.log(f"خطای ورود به کلاس: {exc}")
+            message = sanitize_diagnostic(str(exc))
+            self.log(f"خطای ورود به کلاس: {message}")
             raise
+        finally:
+            if context is not None and not (config.browser.keep_open and not config.browser.headless and not self.stop_event.is_set()):
+                try:
+                    context.close()
+                except Exception:
+                    pass
+            if browser is not None and not (config.browser.keep_open and not config.browser.headless and not self.stop_event.is_set()):
+                try:
+                    browser.close()
+                except Exception:
+                    pass
+
+    def _validate_full_flow_inputs(self, config: AppConfig, password: str) -> None:
+        if not config.profile_id:
+            raise ValueError("Profile انتخاب نشده است.")
+        if not config.login_url.startswith(("http://", "https://")):
+            raise ValueError("URL ورود خالی یا نامعتبر است.")
+        if not config.username.strip():
+            raise ValueError("نام کاربری خالی است.")
+        if not password:
+            raise ValueError("رمز عبور وارد یا در Windows Credential Manager ذخیره نشده است.")
+        if not config.class_name.strip():
+            raise ValueError("ابتدا یک کلاس یا زمان‌بندی را انتخاب کنید.")
+        if config.site_adapter != VADANA_SITE_ADAPTER:
+            raise ValueError("Site Adapter پشتیبانی نمی‌شود.")
+
+    def _ensure_login_state(self, page, adapter, config: AppConfig, password: str) -> bool:
+        page.goto(config.login_url, wait_until="domcontentloaded", timeout=60_000)
+        if self._dashboard_visible(page):
+            self.log("نشست ورود معتبر است")
+            self.log("صفحه میزکار شناسایی شد")
+            return True
+        if self._login_visible(page) or "/login/index.php" in getattr(page, "url", ""):
+            self.log("صفحه ورود شناسایی شد")
+            self.log("اطلاعات ورود امن دریافت شد")
+            result = adapter.login(page, config.username, password, 60_000, self.stop_event)
+            if not result.success:
+                raise RuntimeError(result.message)
+            self.log("ورود موفق بود")
+            return True
+        self.log("وضعیت نشست نامشخص است؛ صفحه ورود دوباره بررسی می‌شود")
+        page.goto(VADANA_LOGIN_URL, wait_until="domcontentloaded", timeout=60_000)
+        if self._dashboard_visible(page):
+            self.log("نشست ورود معتبر است")
+            self.log("صفحه میزکار شناسایی شد")
+            return True
+        self.log("صفحه ورود شناسایی شد")
+        self.log("اطلاعات ورود امن دریافت شد")
+        result = adapter.login(page, config.username, password, 60_000, self.stop_event)
+        if not result.success:
+            raise RuntimeError(result.message)
+        self.log("ورود موفق بود")
+        return True
+
+    def _dashboard_visible(self, page) -> bool:
+        try:
+            page.get_by_text("درس‌های من", exact=True).wait_for(state="visible", timeout=1500)
+            return True
+        except Exception:
+            return False
+
+    def _login_visible(self, page) -> bool:
+        try:
+            page.locator("input#username, input[name='username']").first.wait_for(state="visible", timeout=1500)
+            return True
+        except Exception:
+            return False
+
+    def _check_stop(self) -> None:
+        if self.stop_event.is_set():
+            raise RuntimeError("عملیات توسط کاربر متوقف شد.")
 
     def open_site(self, url: str, settings: BrowserSettings) -> bool:
         """Open a URL in real Google Chrome and report success without crashing the app."""

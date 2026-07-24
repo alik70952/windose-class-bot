@@ -83,64 +83,88 @@ class BrowserAutomation:
         self.log("کلاس انتخاب‌شده دریافت شد")
         context = None
         browser = None
+        playwright_manager = None
+        playwright = None
         active_page = None
+        keep_open = config.browser.keep_open and not config.browser.headless
         try:
             adapter = get_adapter(config.site_adapter)
             adapter.log = self.log
-            with sync_playwright() as playwright:
-                self.log("Chrome در حال اجرا است")
-                if config.browser.save_session:
-                    context = playwright.chromium.launch_persistent_context(
-                        user_data_dir=str(Path(config.browser.session_dir)),
-                        channel="chrome",
-                        headless=config.browser.headless,
-                    )
-                    page = context.new_page() if not context.pages else context.pages[0]
-                else:
-                    browser = playwright.chromium.launch(channel="chrome", headless=config.browser.headless)
-                    context = browser.new_context()
-                    page = context.new_page()
+            playwright_manager = sync_playwright()
+            playwright = playwright_manager.start() if hasattr(playwright_manager, "start") else playwright_manager.__enter__()
+            self.log("Chrome در حال اجرا است")
+            if config.browser.save_session:
+                context = playwright.chromium.launch_persistent_context(
+                    user_data_dir=str(Path(config.browser.session_dir)),
+                    channel="chrome",
+                    headless=config.browser.headless,
+                )
+                page = context.new_page() if not context.pages else context.pages[0]
+            else:
+                browser = playwright.chromium.launch(channel="chrome", headless=config.browser.headless)
+                context = browser.new_context()
+                page = context.new_page()
+            active_page = page
 
-                self._check_stop()
-                self.log("در حال بررسی نشست ورود")
-                logged_in = self._ensure_login_state(page, adapter, config, password)
-                if not logged_in:
-                    raise RuntimeError("ورود به وادانا انجام نشد.")
+            self._check_stop()
+            self.log("در حال بررسی نشست ورود")
+            logged_in = self._ensure_login_state(page, adapter, config, password)
+            if not logged_in:
+                raise RuntimeError("ورود به وادانا انجام نشد.")
 
-                self._check_stop()
-                adapter.open_course(page, config.class_name, 60_000, self.stop_event)
-                self._check_stop()
-                self.log("در حال بررسی لینک ورود به کلاس")
-                active_page = adapter.enter_online_class(page, config.class_name, timeout_ms, self.stop_event)
-                self.log("درخواست ورود به کلاس ارسال شد")
+            self._check_stop()
+            adapter.open_course(page, config.class_name, 60_000, self.stop_event)
+            self._check_stop()
+            self.log("در حال بررسی لینک ورود به کلاس")
+            active_page = adapter.enter_online_class(page, config.class_name, timeout_ms, self.stop_event)
+            self.log("درخواست ورود به کلاس ارسال شد")
 
-                if launch_adobe_connect and config.adobe_connect_url:
-                    self.log("در صورت نیاز Adobe Connect توسط لینک کلاس یا آدرس تنظیم‌شده باز می‌شود")
-                    active_page.goto(config.adobe_connect_url, wait_until="domcontentloaded", timeout=60_000)
+            if launch_adobe_connect and config.adobe_connect_url:
+                self.log("در صورت نیاز Adobe Connect توسط لینک کلاس یا آدرس تنظیم‌شده باز می‌شود")
+                active_page.goto(config.adobe_connect_url, wait_until="domcontentloaded", timeout=60_000)
 
-                if config.browser.keep_open and not config.browser.headless and not self.stop_event.is_set():
-                    self.log("مرورگر باز می‌ماند. برای توقف از دکمه توقف ربات استفاده کنید.")
-                    while not self.stop_event.wait(0.5):
-                        if active_page.is_closed():
-                            break
-
-                self.log("جریان کامل ربات با موفقیت انجام شد")
-                return True
+            self.log("جریان کامل ربات با موفقیت انجام شد")
+            if keep_open and not self.stop_event.is_set():
+                self._wait_for_browser_to_stay_open(active_page or page)
+            return True
         except Exception as exc:
             message = sanitize_diagnostic(str(exc))
             self.log(f"خطای ورود به کلاس: {message}")
+            if keep_open and active_page is not None and not self.stop_event.is_set():
+                self._wait_for_browser_to_stay_open(active_page)
             raise
         finally:
-            if context is not None and not (config.browser.keep_open and not config.browser.headless and not self.stop_event.is_set()):
-                try:
-                    context.close()
-                except Exception:
-                    pass
-            if browser is not None and not (config.browser.keep_open and not config.browser.headless and not self.stop_event.is_set()):
-                try:
-                    browser.close()
-                except Exception:
-                    pass
+            should_close = not keep_open or self.stop_event.is_set()
+            if should_close:
+                if context is not None:
+                    try:
+                        context.close()
+                    except Exception:
+                        pass
+                if browser is not None:
+                    try:
+                        browser.close()
+                    except Exception:
+                        pass
+                if playwright_manager is not None:
+                    try:
+                        if hasattr(playwright_manager, "stop"):
+                            playwright_manager.stop()
+                        elif hasattr(playwright_manager, "__exit__"):
+                            playwright_manager.__exit__(None, None, None)
+                    except Exception:
+                        pass
+
+
+    def _wait_for_browser_to_stay_open(self, page) -> None:
+        """Keep Playwright and Chrome alive until the user closes Chrome or stops the worker."""
+        self.log("مرورگر باز می‌ماند. برای توقف از دکمه توقف ربات استفاده کنید.")
+        while not self.stop_event.wait(0.5):
+            try:
+                if page.is_closed():
+                    break
+            except Exception:
+                break
 
     def _validate_full_flow_inputs(self, config: AppConfig, password: str) -> None:
         if not config.profile_id:

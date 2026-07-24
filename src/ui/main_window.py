@@ -11,7 +11,8 @@ from urllib.parse import urlparse
 import customtkinter as ctk
 
 from src.browser.automation import BrowserAutomation
-from src.config.manager import AppConfig, BrowserSettings, ConfigManager, VADANA_SITE_ADAPTER
+from src.config.manager import AppConfig, BrowserSettings, ConfigManager, VADANA_PROFILE_NAME, VADANA_SITE_ADAPTER
+from src.classes.presets import CLASS_PRESETS, ClassPreset
 from src.security.credentials import CredentialStore
 from src.utils.logger import UiLogQueue
 from src.ui.schedule_frame import ScheduleFrame
@@ -59,6 +60,7 @@ class MainWindow(ctk.CTk):
         self.username_entry = self._entry(container, "نام کاربری *")
         self.password_entry = self._entry(container, "رمز عبور *", show="*")
         self.class_entry = self._entry(container, "نام کلاس *")
+        self._build_class_preset_section(container)
         self.adobe_entry = self._entry(container, "آدرس اختیاری Adobe Connect")
 
         options = ctk.CTkFrame(container)
@@ -79,7 +81,7 @@ class MainWindow(ctk.CTk):
             ("بارگذاری تنظیمات", self.load_config),
             ("آزمایش بازشدن سایت", self.test_site),
             ("آزمایش ورود به وادانا", self.test_vadana_login),
-            ("شروع ربات", self.start_bot),
+            ("ورود خودکار به کلاس", self.start_bot),
             ("توقف ربات", self.stop_bot),
             ("حذف رمز ذخیره‌شده", self.delete_saved_password),
             ("پاک‌کردن نشست", self.clear_browser_session),
@@ -106,6 +108,56 @@ class MainWindow(ctk.CTk):
         entry.pack(fill="x")
         return entry
 
+    def _build_class_preset_section(self, parent: ctk.CTkFrame) -> None:
+        """Build simple fixed class cards for the Vadana Unit 39 profile."""
+        self.selected_class_name = ""
+        self.class_cards: dict[str, ctk.CTkFrame] = {}
+        self.class_status_label = ctk.CTkLabel(parent, text="کلاس انتخاب‌شده: —", anchor="e", font=("Tahoma", 14, "bold"))
+        self.class_status_label.pack(fill="x", pady=(12, 2))
+        self.class_preset_frame = ctk.CTkFrame(parent)
+        self.class_preset_frame.pack(fill="x", pady=(4, 8))
+        ctk.CTkLabel(self.class_preset_frame, text="انتخاب کلاس", anchor="e", font=("Tahoma", 16, "bold")).pack(fill="x", padx=12, pady=(10, 4))
+        for preset in CLASS_PRESETS:
+            self._add_class_card(self.class_preset_frame, preset)
+
+    def _add_class_card(self, parent: ctk.CTkFrame, preset: ClassPreset) -> None:
+        card = ctk.CTkFrame(parent, border_width=1, border_color="#3b3b3b", fg_color="#242424")
+        card.pack(fill="x", padx=12, pady=6)
+        card.bind("<Button-1>", lambda _event, name=preset.name: self.select_class(name))
+        for column in range(4):
+            card.grid_columnconfigure(column, weight=1)
+        ctk.CTkLabel(card, text=preset.name, anchor="e", justify="right", font=("Tahoma", 13, "bold"), wraplength=470).grid(row=0, column=1, columnspan=3, sticky="ew", padx=10, pady=(8, 2))
+        ctk.CTkLabel(card, text=f"روز کلاس: {preset.weekday}", anchor="e", font=("Tahoma", 12)).grid(row=1, column=2, sticky="e", padx=10, pady=2)
+        ctk.CTkLabel(card, text=f"ساعت کلاس: {preset.start_time} تا {preset.end_time}", anchor="e", font=("Tahoma", 12)).grid(row=1, column=1, sticky="e", padx=10, pady=2)
+        ctk.CTkButton(card, text="ورود همین حالا", command=lambda p=preset: self.enter_preset_now(p)).grid(row=0, column=0, sticky="ew", padx=8, pady=(8, 2))
+        ctk.CTkButton(card, text="انتخاب", command=lambda name=preset.name: self.select_class(name), width=80).grid(row=1, column=0, sticky="ew", padx=8, pady=(2, 8))
+        self.class_cards[preset.name] = card
+
+    def select_class(self, class_name: str) -> None:
+        """Select exactly one fixed class and mirror it to the hidden class field."""
+        self.selected_class_name = class_name
+        self.class_entry.delete(0, END)
+        self.class_entry.insert(0, class_name)
+        self.class_status_label.configure(text=f"کلاس انتخاب‌شده: {class_name}")
+        for name, card in self.class_cards.items():
+            selected = name == class_name
+            card.configure(border_color="#1f6aa5" if selected else "#3b3b3b", fg_color="#12324a" if selected else "#242424")
+        try:
+            self.config_manager.save(self._settings_from_ui())
+        except Exception:
+            pass
+
+    def _toggle_class_picker_visibility(self, config: AppConfig) -> None:
+        is_vadana = config.site_adapter == VADANA_SITE_ADAPTER or config.profile_name == VADANA_PROFILE_NAME
+        if is_vadana:
+            self.class_entry.pack_forget()
+            self.class_preset_frame.pack(fill="x", pady=(4, 8))
+            self.class_status_label.pack(fill="x", pady=(12, 2))
+        else:
+            self.class_preset_frame.pack_forget()
+            self.class_status_label.pack_forget()
+            self.class_entry.pack(fill="x")
+
     def _toggle_password(self) -> None:
         """Switch password field visibility."""
         self.password_entry.configure(show="" if self.show_password_var.get() else "*")
@@ -116,7 +168,7 @@ class MainWindow(ctk.CTk):
             profile_name=self.profile_entry.get().strip(),
             login_url=self.url_entry.get().strip(),
             username=self.username_entry.get().strip(),
-            class_name=self.class_entry.get().strip(),
+            class_name=self.selected_class_name or self.class_entry.get().strip(),
             adobe_connect_url=self.adobe_entry.get().strip(),
             site_adapter=VADANA_SITE_ADAPTER if ("وادانا" in self.profile_entry.get() or "vadana-sum39.ec.iau.ir" in self.url_entry.get()) else "",
             profile_id=self.current_profile_id or "vadana-sum39",
@@ -140,6 +192,11 @@ class MainWindow(ctk.CTk):
         ):
             entry.delete(0, END)
             entry.insert(0, value)
+        if config.class_name:
+            self.select_class(config.class_name)
+        else:
+            self.class_status_label.configure(text="کلاس انتخاب‌شده: —")
+        self._toggle_class_picker_visibility(config)
         self.keep_open_var.set(config.browser.keep_open)
         self.headless_var.set(config.browser.headless)
         self.save_session_var.set(config.browser.save_session)
@@ -218,7 +275,7 @@ class MainWindow(ctk.CTk):
             config.browser.keep_open = schedule.keep_browser_open
             config.browser.save_session = schedule.save_session
         if not config.class_name:
-            self._show_error("ابتدا یک کلاس یا زمان‌بندی را انتخاب کنید.")
+            self._show_error("ابتدا یکی از کلاس‌های آماده را انتخاب کنید.")
             return
         if config.site_adapter != VADANA_SITE_ADAPTER:
             self._show_error("Site Adapter پشتیبانی نمی‌شود.")
@@ -226,11 +283,30 @@ class MainWindow(ctk.CTk):
         if not config.username:
             self._show_error("نام کاربری خالی است.")
             return
-        password = self.password_entry.get() or self.credentials.get_password(config.profile_id, config.username)
+        password = self._get_or_save_password(config)
         if not password:
             self._show_error("رمز عبور وارد یا در Windows Credential Manager ذخیره نشده است.")
             return
         self._run_full_class_flow(config, password, schedule.launch_adobe_connect if schedule else True, (schedule.class_entry_timeout_seconds * 1000) if schedule else 900_000)
+
+    def enter_preset_now(self, preset: ClassPreset) -> None:
+        """Select a fixed class, save it, and immediately run the full manual flow."""
+        self.select_class(preset.name)
+        config = self._settings_from_ui()
+        config.browser.keep_open = True
+        config.browser.headless = False
+        self.config_manager.save(config)
+        password = self._get_or_save_password(config)
+        if not password:
+            self._show_error("رمز عبور وارد یا در Windows Credential Manager ذخیره نشده است.")
+            return
+        self._run_full_class_flow(config, password, True, 900_000)
+
+    def _get_or_save_password(self, config: AppConfig) -> str:
+        password = self.password_entry.get() or self.credentials.get_password(config.profile_id, config.username)
+        if password and self.password_entry.get() and self.save_password_var.get():
+            self.credentials.save_password(config.profile_id, config.username, password)
+        return password
 
     def delete_saved_password(self) -> None:
         """Delete the saved password for the stable active profile id."""

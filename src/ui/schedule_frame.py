@@ -7,91 +7,151 @@ import customtkinter as ctk
 from src.classes.presets import CLASS_PRESETS, ClassPreset
 from src.scheduling.manager import ScheduleManager
 from src.scheduling.models import ClassSchedule
-from src.scheduling.time_utils import convert_12h_to_24h, convert_24h_to_12h, effective_for_weekday, format_12h, next_run_datetime, remaining_text
+from src.scheduling.time_utils import format_12h, next_run_datetime, remaining_text
 from src.scheduling.windows_task_scheduler import WindowsTaskScheduler
 from src.scheduling.executor import ScheduleExecutor
 
 
 class ScheduleFrame(ctk.CTkFrame):
-    """Persian 12-hour schedule form and list for the three fixed class cards."""
+    """Simple delay-based scheduler for the fixed Vadana class cards."""
     def __init__(self, master, config_manager, logs) -> None:
-        super().__init__(master); self.manager=ScheduleManager(config_manager); self.logs=logs; self.selected_id=""
-        self.class_var=ctk.StringVar(value=CLASS_PRESETS[0].name)
-        self.hour_var=ctk.StringVar(value="09"); self.minute_var=ctk.StringVar(value="15"); self.period_var=ctk.StringVar(value="AM")
-        self.early_var=ctk.StringVar(value="5"); self.wait_var=ctk.StringVar(value="15"); self.late_var=ctk.StringVar(value="15"); self.adobe_wait_var=ctk.StringVar(value="20")
-        self.launch_var=ctk.BooleanVar(value=True); self.keep_var=ctk.BooleanVar(value=True); self.enabled_var=ctk.BooleanVar(value=True)
-        self._build(); self.prefill_for_class(CLASS_PRESETS[0], log=False); self.refresh(); self._tick_clock()
+        super().__init__(master)
+        self.manager = ScheduleManager(config_manager)
+        self.logs = logs
+        self.selected_id = ""
+        self.class_var = ctk.StringVar(value=CLASS_PRESETS[0].name)
+        self.delay_hours_var = ctk.StringVar(value="0")
+        self.delay_minutes_var = ctk.StringVar(value="5")
+        self._build()
+        self.prefill_for_class(CLASS_PRESETS[0], log=False)
+        self.refresh()
+        self._update_summary()
+
     def _build(self):
-        ctk.CTkLabel(self,text="زمان‌بندی ورود خودکار به کلاس",font=("Tahoma",18,"bold"),anchor="e").pack(fill="x",pady=(8,4))
-        self.clock_label=ctk.CTkLabel(self,text="زمان‌بندی براساس ساعت محلی این رایانه اجرا می‌شود.",anchor="e"); self.clock_label.pack(fill="x",padx=8)
-        ctk.CTkLabel(self,text="AM = قبل از ظهر | PM = بعد از ظهر | 12:00 PM = 12 ظهر | 12:00 AM = 12 شب | 01:30 PM = 1:30 بعدازظهر | 09:15 AM = 9:15 صبح",anchor="e",wraplength=760).pack(fill="x",padx=8)
-        form=ctk.CTkFrame(self); form.pack(fill="x",padx=8,pady=6)
-        for i in range(3): form.grid_columnconfigure(i,weight=1)
-        self.class_menu=ctk.CTkOptionMenu(form,variable=self.class_var,values=[p.name for p in CLASS_PRESETS],command=self._on_class_selected)
-        self.hour_menu=ctk.CTkOptionMenu(form,variable=self.hour_var,values=[f"{i:02d}" for i in range(1,13)],command=lambda _v:self._update_summary())
-        self.minute_menu=ctk.CTkOptionMenu(form,variable=self.minute_var,values=[f"{i:02d}" for i in range(60)],command=lambda _v:self._update_summary())
-        self.period_menu=ctk.CTkOptionMenu(form,variable=self.period_var,values=["AM","PM"],command=lambda _v:self._update_summary())
-        ctk.CTkLabel(form,text="کلاس",anchor="e").grid(row=0,column=2,sticky="e",padx=8,pady=(6,2)); self.class_menu.grid(row=1,column=1,columnspan=2,sticky="ew",padx=8)
-        ctk.CTkLabel(form,text="ساعت ورود",anchor="e").grid(row=2,column=2,sticky="e",padx=8,pady=(8,2)); self.hour_menu.grid(row=3,column=2,sticky="ew",padx=4); self.minute_menu.grid(row=3,column=1,sticky="ew",padx=4); self.period_menu.grid(row=3,column=0,sticky="ew",padx=4)
-        self.early_menu=ctk.CTkOptionMenu(form,variable=self.early_var,values=["0","5","10","15"],command=lambda _v:self._update_summary())
-        self.wait_menu=ctk.CTkOptionMenu(form,variable=self.wait_var,values=["1","5","10","15","30"]); self.adobe_wait_menu=ctk.CTkOptionMenu(form,variable=self.adobe_wait_var,values=["10","20","30","60"]); self.late_menu=ctk.CTkOptionMenu(form,variable=self.late_var,values=["5","10","15","30"])
-        for col,(label,w) in enumerate([("ورود زودتر",self.early_menu),("حداکثر انتظار لینک (دقیقه)",self.wait_menu),("انتظار Adobe (ثانیه)",self.adobe_wait_menu)]):
-            ctk.CTkLabel(form,text=label,anchor="e").grid(row=4,column=col,sticky="e",padx=8,pady=(8,2)); w.grid(row=5,column=col,sticky="ew",padx=8)
-        ctk.CTkCheckBox(form,text="اجرای Adobe Connect",variable=self.launch_var).grid(row=6,column=2,sticky="e",padx=8,pady=8); ctk.CTkCheckBox(form,text="مرورگر باز بماند",variable=self.keep_var).grid(row=6,column=1,sticky="e",padx=8,pady=8); ctk.CTkCheckBox(form,text="زمان‌بندی فعال باشد",variable=self.enabled_var).grid(row=6,column=0,sticky="e",padx=8,pady=8)
-        self.summary_label=ctk.CTkLabel(self,text="",anchor="e",wraplength=760); self.summary_label.pack(fill="x",padx=8,pady=4)
-        actions=ctk.CTkFrame(self); actions.pack(fill="x",padx=8,pady=6)
-        for text,cmd in [("ذخیره زمان‌بندی",self.save),("ویرایش زمان‌بندی",self.edit_selected),("حذف زمان‌بندی",self.delete),("فعال/غیرفعال‌کردن",self.toggle),("اجرای همین حالا",self.run_now),("بررسی Task ذخیره‌شده",self.verify_task),("همگام‌سازی با ساعت Windows",self.sync_windows_time),("آزمایش زمان‌بندی در 2 دقیقه آینده",self.test_in_two_minutes)]: ctk.CTkButton(actions,text=text,command=cmd).pack(side="right",padx=3,pady=4)
-        self.list_frame=ctk.CTkFrame(self); self.list_frame.pack(fill="x",padx=8,pady=(4,10))
-    def _tick_clock(self):
-        self.clock_label.configure(text=f"زمان‌بندی براساس ساعت محلی این رایانه اجرا می‌شود. ساعت فعلی رایانه: {datetime.now().strftime('%I:%M %p')}"); self.after(30000,self._tick_clock)
-    def _update_summary(self):
-        try:
-            start=convert_12h_to_24h(self.hour_var.get(),self.minute_var.get(),self.period_var.get()); run,_=__import__('src.scheduling.time_utils',fromlist=['actual_run_time']).actual_run_time(start,int(self.early_var.get()))
-            self.summary_label.configure(text=(f"کلاس و ربات ساعت {format_12h(start)} اجرا می‌شوند." if int(self.early_var.get())==0 else f"کلاس ساعت {format_12h(start)} شروع می‌شود و ربات ساعت {format_12h(run)} اجرا خواهد شد."))
-        except Exception as exc: self.summary_label.configure(text=str(exc))
+        ctk.CTkLabel(self, text="زمان‌بندی ساده اجرای ربات", font=("Tahoma", 18, "bold"), anchor="e").pack(fill="x", pady=(8, 4))
+        ctk.CTkLabel(self, text="کلاس را انتخاب کنید، بگویید ربات چند ساعت و چند دقیقه دیگر اجرا شود، سپس دکمه «اجرا» را بزنید.", anchor="e", wraplength=760).pack(fill="x", padx=8)
+
+        form = ctk.CTkFrame(self)
+        form.pack(fill="x", padx=8, pady=8)
+        for i in range(4):
+            form.grid_columnconfigure(i, weight=1)
+
+        self.class_menu = ctk.CTkOptionMenu(form, variable=self.class_var, values=[p.name for p in CLASS_PRESETS], command=self._on_class_selected)
+        ctk.CTkLabel(form, text="کلاس", anchor="e").grid(row=0, column=3, sticky="e", padx=8, pady=(8, 2))
+        self.class_menu.grid(row=1, column=1, columnspan=3, sticky="ew", padx=8, pady=(0, 8))
+
+        self.hours_entry = ctk.CTkEntry(form, textvariable=self.delay_hours_var, justify="center", width=90)
+        self.minutes_entry = ctk.CTkEntry(form, textvariable=self.delay_minutes_var, justify="center", width=90)
+        ctk.CTkLabel(form, text="چند ساعت دیگر", anchor="e").grid(row=2, column=3, sticky="e", padx=8, pady=(8, 2))
+        self.hours_entry.grid(row=3, column=3, sticky="ew", padx=8, pady=(0, 8))
+        ctk.CTkLabel(form, text="چند دقیقه دیگر", anchor="e").grid(row=2, column=2, sticky="e", padx=8, pady=(8, 2))
+        self.minutes_entry.grid(row=3, column=2, sticky="ew", padx=8, pady=(0, 8))
+
+        for var in (self.delay_hours_var, self.delay_minutes_var):
+            var.trace_add("write", lambda *_args: self._update_summary())
+
+        self.summary_label = ctk.CTkLabel(self, text="", anchor="e", wraplength=760)
+        self.summary_label.pack(fill="x", padx=8, pady=4)
+
+        actions = ctk.CTkFrame(self)
+        actions.pack(fill="x", padx=8, pady=6)
+        ctk.CTkButton(actions, text="اجرا", command=self.save).pack(side="right", padx=4, pady=6)
+        ctk.CTkButton(actions, text="حذف زمان‌بندی انتخاب‌شده", command=self.delete).pack(side="right", padx=4, pady=6)
+        ctk.CTkButton(actions, text="اجرای همین حالا", command=self.run_now).pack(side="right", padx=4, pady=6)
+
+        self.list_frame = ctk.CTkFrame(self)
+        self.list_frame.pack(fill="x", padx=8, pady=(4, 10))
+
     def _selected_preset(self) -> ClassPreset:
         return next((p for p in CLASS_PRESETS if p.name == self.class_var.get()), CLASS_PRESETS[0])
-    def _on_class_selected(self,_value:str):
+
+    def _on_class_selected(self, _value: str):
         self.prefill_for_class(self._selected_preset())
-    def prefill_for_class(self,preset:ClassPreset,log:bool=True):
-        self.class_var.set(preset.name); h,m,p=convert_24h_to_12h(preset.start_time); self.hour_var.set(h); self.minute_var.set(m); self.period_var.set(p); self._update_summary(); self.update_idletasks()
-        if log: self.logs.log("کلاس در فرم زمان‌بندی انتخاب شد")
+
+    def prefill_for_class(self, preset: ClassPreset, log: bool = True):
+        self.class_var.set(preset.name)
+        self._update_summary()
+        self.update_idletasks()
+        if log:
+            self.logs.log("کلاس در فرم زمان‌بندی انتخاب شد")
+
+    def _delay(self) -> timedelta | None:
+        try:
+            hours = int(self.delay_hours_var.get() or 0)
+            minutes = int(self.delay_minutes_var.get() or 0)
+        except ValueError:
+            return None
+        if hours < 0 or minutes < 0 or minutes > 59 or (hours == 0 and minutes == 0):
+            return None
+        return timedelta(hours=hours, minutes=minutes)
+
+    def _update_summary(self):
+        delay = self._delay()
+        if delay is None:
+            self.summary_label.configure(text="زمان را به‌صورت عددی وارد کنید؛ دقیقه باید بین 0 تا 59 باشد و کل زمان نباید صفر باشد.")
+            return
+        when = datetime.now() + delay
+        self.summary_label.configure(text=f"ربات برای کلاس «{self.class_var.get()}» در {when.strftime('%Y-%m-%d %H:%M')} اجرا می‌شود.")
+
     def _schedule_from_form(self):
-        try: start=convert_12h_to_24h(self.hour_var.get(),self.minute_var.get(),self.period_var.get())
-        except ValueError as exc: self.logs.log(str(exc)); return None
-        preset=self._selected_preset()
-        s=ClassSchedule(id=self.selected_id or __import__('uuid').uuid4().hex, profile_id="vadana-sum39", class_name=self.class_var.get(), recurrence="weekly", weekday=preset.weekday, date="", start_time=start, class_start_time=start, early_minutes=int(self.early_var.get()), class_entry_timeout_seconds=int(self.wait_var.get())*60, launch_adobe_connect=self.launch_var.get(), keep_browser_open=self.keep_var.get(), enabled=self.enabled_var.get(), adobe_launch_wait_seconds=int(self.adobe_wait_var.get()), max_late_start_minutes=int(self.late_var.get()))
-        s.effective_run_time,s.effective_run_weekday=effective_for_weekday(s.weekday,start,s.early_minutes)
-        s.next_run=next_run_datetime(s).isoformat(timespec="seconds"); return s
+        delay = self._delay()
+        if delay is None:
+            self.logs.log("زمان واردشده معتبر نیست.")
+            return None
+        when = datetime.now() + delay
+        return ClassSchedule(
+            id=self.selected_id or __import__('uuid').uuid4().hex,
+            profile_id="vadana-sum39",
+            class_name=self.class_var.get(),
+            recurrence="once",
+            date=when.date().isoformat(),
+            start_time=when.strftime("%H:%M"),
+            class_start_time=when.strftime("%H:%M"),
+            early_minutes=0,
+            effective_run_time=when.strftime("%H:%M"),
+            effective_run_date=when.date().isoformat(),
+            class_entry_timeout_seconds=900,
+            launch_adobe_connect=True,
+            keep_browser_open=True,
+            enabled=True,
+            adobe_launch_wait_seconds=20,
+            max_late_start_minutes=15,
+            next_run=when.isoformat(timespec="seconds"),
+        )
+
     def save(self):
-        s=self._schedule_from_form();
-        if not s: return
-        self.manager.upsert(s); self.selected_id=s.id; r=WindowsTaskScheduler().register(s); self.logs.log("Windows Task ساخته شد" if r.success else r.message); self.refresh()
+        s = self._schedule_from_form()
+        if not s:
+            return
+        self.manager.upsert(s)
+        self.selected_id = s.id
+        r = WindowsTaskScheduler().register(s)
+        self.logs.log("زمان‌بندی اجرا ثبت شد." if r.success else r.message)
+        self.refresh()
+
     def refresh(self):
-        for child in self.list_frame.winfo_children(): child.destroy()
-        for s in self.manager.list():
-            row=ctk.CTkFrame(self.list_frame); row.pack(fill="x",pady=4); row.bind("<Button-1>",lambda _e,sid=s.id:setattr(self,'selected_id',sid))
-            nr=next_run_datetime(s); text=f"{s.class_name}\nشروع کلاس: {format_12h(s.class_start_time or s.start_time)} | اجرای ربات: {format_12h(s.effective_run_time)} | زمان‌بندی هفتگی خودکار | {'فعال' if s.enabled else 'غیرفعال'} | اجرای بعدی: {nr.strftime('%Y-%m-%d %I:%M %p')} | زمان باقی‌مانده: {remaining_text(nr)} | آخرین اجرا: {s.last_run_at or '—'} | نتیجه: {s.last_run_status}"
-            ctk.CTkLabel(row,text=text,justify="right",anchor="e",wraplength=760).pack(side="right",fill="x",expand=True,padx=6)
-    def _load(self,sid):
-        s=self.manager.get(sid); self.selected_id=sid
-        if s: self.class_var.set(s.class_name); h,m,p=convert_24h_to_12h(s.class_start_time or s.start_time); self.hour_var.set(h); self.minute_var.set(m); self.period_var.set(p); self.early_var.set(str(s.early_minutes)); self.wait_var.set(str(s.wait_timeout_minutes)); self.launch_var.set(s.launch_adobe_connect); self.keep_var.set(s.keep_browser_open); self.enabled_var.set(s.enabled); self.adobe_wait_var.set(str(s.adobe_launch_wait_seconds)); self.late_var.set(str(s.max_late_start_minutes)); self._update_summary()
-    def edit_selected(self):
-        if self.selected_id: self._load(self.selected_id)
+        for child in self.list_frame.winfo_children():
+            child.destroy()
+        schedules = sorted(self.manager.list(), key=lambda item: item.next_run or item.created_at)
+        for s in schedules:
+            row = ctk.CTkFrame(self.list_frame)
+            row.pack(fill="x", pady=4)
+            row.bind("<Button-1>", lambda _e, sid=s.id: setattr(self, 'selected_id', sid))
+            try:
+                nr = next_run_datetime(s)
+                next_text = f"{nr.strftime('%Y-%m-%d %H:%M')} | باقی‌مانده: {remaining_text(nr)}"
+            except Exception:
+                next_text = s.next_run or "—"
+            text = f"{s.class_name}\nاجرای برنامه‌ریزی‌شده: {format_12h(s.effective_run_time or s.start_time)} | {next_text} | نتیجه آخر: {s.last_run_status}"
+            ctk.CTkLabel(row, text=text, justify="right", anchor="e", wraplength=760).pack(side="right", fill="x", expand=True, padx=6)
+
     def delete(self):
-        if self.selected_id: self.manager.delete(self.selected_id); WindowsTaskScheduler().delete(self.selected_id); self.selected_id=""; self.refresh()
-    def toggle(self):
-        s=self.manager.get(self.selected_id)
-        if s: s.enabled=not s.enabled; self.manager.upsert(s); WindowsTaskScheduler().register(s); self.refresh()
+        if self.selected_id:
+            self.manager.delete(self.selected_id)
+            WindowsTaskScheduler().delete(self.selected_id)
+            self.selected_id = ""
+            self.refresh()
+
     def run_now(self):
-        if self.selected_id and messagebox.askyesno("تأیید","اجرای دستی روز و ساعت زمان‌بندی را نادیده می‌گیرد. ادامه می‌دهید؟"): threading.Thread(target=ScheduleExecutor(log=self.logs.log).run,args=(self.selected_id,),daemon=True).start()
-    def verify_task(self):
-        s=self.manager.get(self.selected_id); self.logs.log(WindowsTaskScheduler().verify(s).message if s else "زمان‌بندی انتخاب نشده است.")
-    def sync_windows_time(self):
-        for s in self.manager.list():
-            if s.enabled: WindowsTaskScheduler().register(s)
-        self.logs.log("همگام‌سازی با ساعت محلی Windows انجام شد.")
-    def test_in_two_minutes(self):
-        s=self._schedule_from_form();
-        if not s: return
-        when=datetime.now()+timedelta(minutes=2); s.id="test_"+s.id; s.test_schedule=True; s.recurrence="once"; s.date=when.date().isoformat(); s.class_start_time=when.strftime('%H:%M'); s.early_minutes=0; s.effective_run_time=s.class_start_time; s.effective_run_date=s.date; self.manager.upsert(s); self.logs.log(WindowsTaskScheduler().register(s).message); self.refresh()
+        if self.selected_id and messagebox.askyesno("تأیید", "اجرای دستی زمان‌بندی را نادیده می‌گیرد. ادامه می‌دهید؟"):
+            threading.Thread(target=ScheduleExecutor(log=self.logs.log).run, args=(self.selected_id,), daemon=True).start()

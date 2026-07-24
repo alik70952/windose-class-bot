@@ -44,7 +44,9 @@ class MainWindow(ctk.CTk):
         self.save_session_var = ctk.BooleanVar(value=False)
         self.save_password_var = ctk.BooleanVar(value=True)
 
+        self._mousewheel_bound = False
         self._build_ui()
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
         self.load_config()
         self._poll_logs()
 
@@ -139,15 +141,39 @@ class MainWindow(ctk.CTk):
         self.class_cards[preset.name] = card
 
     def _bind_mousewheel(self, widget) -> None:
-        def _wheel(event):
-            try:
-                delta = -1 * int(event.delta / 120) if getattr(event, "delta", 0) else (1 if getattr(event, "num", 0) == 5 else -1)
-                self.scrollable_container._parent_canvas.yview_scroll(delta, "units")
-            except Exception:
-                pass
-        self.bind_all("<MouseWheel>", _wheel)
-        self.bind_all("<Button-4>", _wheel)
-        self.bind_all("<Button-5>", _wheel)
+        if self._mousewheel_bound:
+            return
+        self._mousewheel_bound = True
+        self.bind_all("<MouseWheel>", self._on_mousewheel, add="+")
+        self.bind_all("<Button-4>", self._on_mousewheel, add="+")
+        self.bind_all("<Button-5>", self._on_mousewheel, add="+")
+
+    def _on_mousewheel(self, event):
+        delta = getattr(event, "delta", 0)
+        if delta == 0:
+            num = getattr(event, "num", 0)
+            if num == 4:
+                steps = -1
+            elif num == 5:
+                steps = 1
+            else:
+                return
+        elif abs(delta) >= 120:
+            steps = -int(delta / 120)
+        else:
+            steps = -1 if delta > 0 else 1
+
+        scroll_speed = 4
+        self.scrollable_container._parent_canvas.yview_scroll(steps * scroll_speed, "units")
+        return "break"
+
+    def _on_close(self) -> None:
+        if self._mousewheel_bound:
+            self.unbind_all("<MouseWheel>")
+            self.unbind_all("<Button-4>")
+            self.unbind_all("<Button-5>")
+            self._mousewheel_bound = False
+        self.destroy()
 
     def select_class(self, class_name: str) -> None:
         """Select exactly one fixed class and mirror it to the hidden class field."""

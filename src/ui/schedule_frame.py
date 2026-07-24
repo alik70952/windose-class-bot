@@ -160,9 +160,15 @@ class ScheduleFrame(ctk.CTkFrame):
             self.logs.log("زمان‌بندی در SQLite ثبت شد و Heartbeat معتبر است.")
             self.status_label.configure(text="تایم زمان‌بندی شما ثبت شد.")
         else:
-            self.store.cancel(item.id)
-            self.logs.log("سرویس اجرای خودکار راه‌اندازی نشد.")
-            self.status_label.configure(text="زمان‌بندی ثبت نشد: سرویس اجرای خودکار راه‌اندازی نشد.")
+            # Do not throw away the user's schedule just because Windows Task
+            # Scheduler (or its heartbeat check) is temporarily unavailable.
+            # It remains pending and will be picked up after the worker starts,
+            # including on the next app launch/logon.
+            self.logs.log(result.message)
+            self.status_label.configure(
+                text="زمان‌بندی ثبت شد، اما سرویس خودکار هنوز فعال نیست. "
+                     "install.bat را اجرا کنید. جزئیات خطا در گزارش ثبت شد."
+            )
         self.refresh()
 
     def refresh(self):

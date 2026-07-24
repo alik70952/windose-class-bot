@@ -43,3 +43,20 @@ def test_ui_does_not_show_success_without_worker(monkeypatch):
     monkeypatch.setattr(worker_task.time, "monotonic", lambda: next(ticks))
     scheduler = Mock(); scheduler.verify.return_value = worker_task.TaskResult(True, "", []); scheduler.start.return_value = worker_task.TaskResult(True, "", [])
     assert not worker_task.ensure_scheduler_worker_running(1, scheduler, sleep=lambda _: None).success
+
+
+def test_failed_task_start_reports_fallback_reason(monkeypatch):
+    monkeypatch.setattr(worker_task, "worker_is_healthy", lambda: False)
+    ticks = iter([0, 0, 2])
+    monkeypatch.setattr(worker_task.time, "monotonic", lambda: next(ticks))
+    fallback = worker_task.TaskResult(False, "pythonw پیدا نشد", ["pythonw.exe"])
+    monkeypatch.setattr(worker_task, "_detached_start", lambda: fallback)
+    scheduler = Mock()
+    scheduler.verify.return_value = worker_task.TaskResult(False, "Task وجود ندارد", [])
+    scheduler.register.return_value = worker_task.TaskResult(False, "Access is denied", [])
+
+    result = worker_task.ensure_scheduler_worker_running(1, scheduler, sleep=lambda _: None)
+
+    assert not result.success
+    assert "Access is denied" in result.message and "pythonw پیدا نشد" in result.message
+    assert result.args == ["pythonw.exe"]

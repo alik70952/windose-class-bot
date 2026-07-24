@@ -33,13 +33,21 @@ def _show_startup_error_message() -> None:
 def main(argv: list[str] | None = None) -> int:
     """Run the GUI or a background schedule selected by id."""
     parser = argparse.ArgumentParser()
-    parser.add_argument("--run-schedule", dest="schedule_id", default="")
+    parser.add_argument("--run-schedule", dest="schedule_id", default="", help=argparse.SUPPRESS)
+    parser.add_argument("--install-worker", action="store_true")
     args = parser.parse_args(argv)
 
     if args.schedule_id:
         from src.scheduling.executor import ScheduleExecutor
 
         return 0 if ScheduleExecutor().run(args.schedule_id) else 1
+
+    if args.install_worker:
+        from src.scheduling.worker_task import WorkerTaskScheduler
+
+        result = WorkerTaskScheduler().ensure_running()
+        print(result.message)
+        return 0 if result.success else 1
 
     from src.app import run_app
 

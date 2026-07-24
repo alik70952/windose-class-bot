@@ -89,6 +89,10 @@ if errorlevel 1 (
     if errorlevel 1 (call :fail 1 "pytest" & exit /b 1)
 )
 
+echo Registering the persistent background scheduler worker...
+"%VENV_PY%" main.py --install-worker
+if errorlevel 1 (call :fail 1 "Worker registration" & exit /b 1)
+
 echo Installation completed successfully.
 echo Run run.bat to start the application.
 if not "%NO_PAUSE%"=="1" pause

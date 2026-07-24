@@ -3,8 +3,8 @@ import threading, time
 from unittest.mock import Mock
 from src.browser.adobe_connect import AdobeConnectLauncher
 from src.scheduling.models import ClassSchedule
-import src.scheduling.windows_task_scheduler as windows_task_scheduler
-from src.scheduling.windows_task_scheduler import WindowsTaskScheduler, build_run_command
+import src.scheduling.worker_task as worker_task
+from src.scheduling.worker_task import WorkerTaskScheduler, build_worker_command, WORKER_TASK_NAME
 from src.sites.vadana_sum39 import VadanaSum39Adapter, CourseSelectionError
 from src.classes.presets import CLASS_PRESETS
 from tests.test_scheduling import Page
@@ -18,12 +18,12 @@ def test_schedule_model_requested_fields_no_password():
 
 
 def test_task_uses_schedule_id_and_interactive_for_adobe(monkeypatch):
-    monkeypatch.setattr(windows_task_scheduler, "is_windows", lambda: True)
+    monkeypatch.setattr(worker_task, "is_windows", lambda: True)
     runner = Mock(return_value=Mock(returncode=0, stdout="ok", stderr=""))
     s = ClassSchedule(id="safeid", launch_adobe_connect=True)
-    r = WindowsTaskScheduler(runner).register(s)
+    r = WorkerTaskScheduler(runner).register()
     assert r.success and "/IT" not in r.args
-    assert "scheduled_runner.py" in " ".join(build_run_command("safeid")) and "safeid" in r.task_xml
+    assert "schedule_worker.py" in " ".join(build_worker_command()) and "safeid" not in r.task_xml and WORKER_TASK_NAME
     assert runner.call_args.kwargs.get("check") is False
 
 

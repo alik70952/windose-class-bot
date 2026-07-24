@@ -66,6 +66,43 @@ class BrowserAutomation:
             self.log(f"خطای پیش‌بینی‌نشده: {exc}")
         return False
 
+
+    def login_and_enter_class(self, config: AppConfig, password: str, timeout_ms: int = 900_000, launch_adobe_connect: bool = True) -> bool:
+        """Login if needed, open the selected course, and click the live class link."""
+        self.log("در حال آماده‌سازی Google Chrome...")
+        try:
+            adapter = get_adapter(config.site_adapter)
+            with sync_playwright() as playwright:
+                if config.browser.save_session:
+                    context = playwright.chromium.launch_persistent_context(user_data_dir=str(Path(config.browser.session_dir)), channel="chrome", headless=config.browser.headless)
+                    page = context.new_page() if not context.pages else context.pages[0]
+                    browser = None
+                else:
+                    browser = playwright.chromium.launch(channel="chrome", headless=config.browser.headless)
+                    context = browser.new_context(); page = context.new_page()
+                self.log("OpeningDashboard")
+                page.goto(config.login_url, wait_until="domcontentloaded", timeout=60_000)
+                if "/login/index.php" in page.url:
+                    self.log("LoggingIn")
+                    result = adapter.login(page, config.username, password, 60_000, self.stop_event)
+                    if not result.success: raise RuntimeError(result.message)
+                self.log("FindingCourse")
+                adapter.open_course(page, config.class_name, 60_000, self.stop_event)
+                self.log("EnteringClass")
+                active_page = adapter.enter_online_class(page, config.class_name, timeout_ms, self.stop_event)
+                if launch_adobe_connect:
+                    self.log("LaunchingAdobeConnect")
+                if config.browser.keep_open and not config.browser.headless and not self.stop_event.is_set():
+                    self.log("مرورگر باز می‌ماند.")
+                    while not self.stop_event.wait(0.5):
+                        if active_page.is_closed(): break
+                context.close()
+                if browser is not None: browser.close()
+                return True
+        except Exception as exc:
+            self.log(f"خطای ورود به کلاس: {exc}")
+            raise
+
     def open_site(self, url: str, settings: BrowserSettings) -> bool:
         """Open a URL in real Google Chrome and report success without crashing the app."""
         self.log("در حال آماده‌سازی Google Chrome...")

@@ -8,6 +8,7 @@ from src.scheduling.time_utils import convert_12h_to_24h, convert_24h_to_12h, ac
 import src.scheduling.windows_task_scheduler as windows_task_scheduler
 from src.scheduling.windows_task_scheduler import WindowsTaskScheduler, build_task_xml, build_run_command, format_run_command, project_root
 from src.scheduling.schedule_lock import ScheduleLock
+from src import scheduled_runner
 
 @pytest.mark.parametrize('h,m,p,out', [(12,0,'AM','00:00'),(12,0,'PM','12:00'),(1,0,'PM','13:00'),(11,59,'PM','23:59'),(12,30,'AM','00:30')])
 def test_12_to_24(h,m,p,out): assert convert_12h_to_24h(h,m,p)==out
@@ -30,7 +31,7 @@ def test_task_uses_effective_time_and_settings(monkeypatch):
     assert 'MultipleInstancesPolicy' in r.task_xml and 'IgnoreNew' in r.task_xml
     assert 'InteractiveToken' in r.task_xml
     assert str(project_root()) in r.task_xml
-    assert '--run-schedule' in r.task_xml and 'abc' in r.task_xml
+    assert 'scheduled_runner.py' in r.task_xml and 'abc' in r.task_xml
     assert 'password' not in r.task_xml.lower()
 def test_weekly_next_run_future():
     s=ClassSchedule(recurrence='weekly', effective_run_time='09:15', effective_run_weekday='یکشنبه')
@@ -51,12 +52,12 @@ def test_display_and_storage_formats():
     assert s.class_start_time=='12:00' and format_12h(s.class_start_time)=='12:00 PM'
 def test_command_credential_free():
     cmd=build_run_command('sid')
-    assert '--run-schedule' in cmd and 'sid' in cmd and not any('password' in p.lower() for p in cmd)
+    assert cmd[-1] == 'sid' and 'scheduled_runner.py' in cmd[-2] and not any('password' in p.lower() for p in cmd)
 
 def test_windows_command_quotes_project_paths():
     cmd = build_run_command('schedule-id', executable=r'C:\Program Files\Python\python.exe', script=r'C:\Class Bot\main.py')
     rendered = format_run_command(cmd)
-    assert rendered == r'"C:\Program Files\Python\python.exe" "C:\Class Bot\main.py" --run-schedule schedule-id'
+    assert rendered == r'"C:\Program Files\Python\python.exe" "C:\Class Bot\main.py" schedule-id'
     xml = build_task_xml(ClassSchedule(id='schedule-id'))
     assert '<WorkingDirectory>' in xml and str(project_root()) in xml
 def test_am_pm_task_changes():
@@ -66,3 +67,15 @@ def test_am_pm_task_changes():
 def test_test_schedule_cleanup_flag():
     s=ClassSchedule(test_schedule=True, id='test_schedule_1')
     assert s.test_schedule and s.id.startswith('test_schedule')
+
+def test_scheduled_runner_is_synchronous_and_returns_executor_status(monkeypatch):
+    run = Mock(return_value=True)
+    monkeypatch.setattr('src.scheduling.executor.ScheduleExecutor.run', run)
+    assert scheduled_runner.main(['schedule-42']) == 0
+    run.assert_called_once_with('schedule-42')
+
+def test_scheduled_runner_rejects_missing_or_extra_id():
+    with pytest.raises(ValueError):
+        scheduled_runner.main([])
+    with pytest.raises(ValueError):
+        scheduled_runner.main(['one', 'two'])

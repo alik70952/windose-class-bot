@@ -22,8 +22,8 @@ def test_task_uses_schedule_id_and_interactive_for_adobe(monkeypatch):
     runner = Mock(return_value=Mock(returncode=0, stdout="ok", stderr=""))
     s = ClassSchedule(id="safeid", launch_adobe_connect=True)
     r = WindowsTaskScheduler(runner).register(s)
-    assert r.success and "/IT" in r.args
-    assert "--run-schedule" in " ".join(build_run_command("safeid")) and "safeid" in " ".join(r.args)
+    assert r.success and "/IT" not in r.args
+    assert "scheduled_runner.py" in " ".join(build_run_command("safeid")) and "safeid" in r.task_xml
     assert runner.call_args.kwargs.get("check") is False
 
 

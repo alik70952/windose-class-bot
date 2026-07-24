@@ -37,6 +37,8 @@ class MainWindow(ctk.CTk):
         self.stop_event = threading.Event()
         self.worker: threading.Thread | None = None
         self.current_profile_id = ""
+        self.action_buttons: list[ctk.CTkButton] = []
+        self.stop_button: ctk.CTkButton | None = None
 
         self.show_password_var = ctk.BooleanVar(value=False)
         self.keep_open_var = ctk.BooleanVar(value=True)
@@ -55,10 +57,26 @@ class MainWindow(ctk.CTk):
 
     def _build_ui(self) -> None:
         """Create the form, actions, and log panel."""
-        header = ctk.CTkFrame(self)
+        header = ctk.CTkFrame(self, fg_color="transparent")
         header.pack(fill="x", padx=24, pady=(18, 8))
         title = ctk.CTkLabel(header, text="ربات ورود به کلاس آنلاین", font=("Tahoma", 24, "bold"), anchor="e")
         title.pack(fill="x")
+        ctk.CTkLabel(
+            header,
+            text="ورود امن و زمان‌بندی‌شده به کلاس‌های وادانا",
+            font=("Tahoma", 12),
+            text_color=("#5b6472", "#aab2bf"),
+            anchor="e",
+        ).pack(fill="x", pady=(2, 0))
+
+        self.run_status_label = ctk.CTkLabel(
+            header,
+            text="● آماده",
+            font=("Tahoma", 12, "bold"),
+            text_color="#45b97c",
+            anchor="w",
+        )
+        self.run_status_label.place(x=0, y=4)
 
         container = ctk.CTkScrollableFrame(self, orientation="vertical")
         container.pack(fill="both", expand=True, padx=24, pady=(0, 18))
@@ -84,26 +102,40 @@ class MainWindow(ctk.CTk):
         ctk.CTkCheckBox(options, text="ذخیره نشست ورود مرورگر", variable=self.save_session_var).grid(row=1, column=0, sticky="e", padx=12, pady=8)
         ctk.CTkCheckBox(options, text="ذخیره امن رمز عبور", variable=self.save_password_var).grid(row=2, column=1, sticky="e", padx=12, pady=8)
 
+        ctk.CTkLabel(container, text="عملیات", font=("Tahoma", 16, "bold"), anchor="e").pack(fill="x", pady=(12, 2))
         buttons = ctk.CTkFrame(container)
         buttons.pack(fill="x", pady=12)
         button_specs = [
-            ("ذخیره تنظیمات", self.save_config),
-            ("بارگذاری تنظیمات", self.load_config),
-            ("آزمایش بازشدن سایت", self.test_site),
-            ("آزمایش ورود به وادانا", self.test_vadana_login),
-            ("ورود خودکار به کلاس", self.start_bot),
-            ("توقف ربات", self.stop_bot),
-            ("حذف رمز ذخیره‌شده", self.delete_saved_password),
-            ("پاک‌کردن نشست", self.clear_browser_session),
+            ("ورود خودکار به کلاس", self.start_bot, "primary"),
+            ("آزمایش ورود به وادانا", self.test_vadana_login, "normal"),
+            ("آزمایش بازشدن سایت", self.test_site, "normal"),
+            ("ذخیره تنظیمات", self.save_config, "normal"),
+            ("توقف عملیات", self.stop_bot, "stop"),
+            ("بارگذاری دوباره", self.load_config, "normal"),
+            ("پاک‌کردن نشست", self.clear_browser_session, "subtle"),
+            ("حذف رمز ذخیره‌شده", self.delete_saved_password, "danger"),
         ]
-        self.action_buttons = []
-        for index, (text, command) in enumerate(button_specs):
-            buttons.grid_columnconfigure(index, weight=1)
-            button = ctk.CTkButton(buttons, text=text, command=command)
-            button.grid(row=0, column=index, padx=5, pady=8, sticky="ew")
+        for column in range(4):
+            buttons.grid_columnconfigure(column, weight=1, uniform="actions")
+        for index, (text, command, role) in enumerate(button_specs):
+            colors = {
+                "primary": {"fg_color": "#1f6aa5", "hover_color": "#185582"},
+                "danger": {"fg_color": "#8f3434", "hover_color": "#702828"},
+                "stop": {"fg_color": "#b45309", "hover_color": "#92400e"},
+                "subtle": {"fg_color": ("#68707c", "#3b414b"), "hover_color": ("#565d67", "#4b5260")},
+                "normal": {},
+            }[role]
+            button = ctk.CTkButton(buttons, text=text, command=command, height=38, **colors)
+            button.grid(row=index // 4, column=3 - (index % 4), padx=5, pady=5, sticky="ew")
             self.action_buttons.append(button)
+            if role == "stop":
+                self.stop_button = button
+                button.configure(state="disabled")
 
-        ctk.CTkLabel(container, text="گزارش اجرا", font=("Tahoma", 16, "bold"), anchor="e").pack(fill="x", pady=(10, 4))
+        log_header = ctk.CTkFrame(container, fg_color="transparent")
+        log_header.pack(fill="x", pady=(10, 4))
+        ctk.CTkButton(log_header, text="پاک‌کردن گزارش", width=110, height=28, command=self.clear_log).pack(side="left")
+        ctk.CTkLabel(log_header, text="گزارش اجرا", font=("Tahoma", 16, "bold"), anchor="e").pack(side="right", fill="x", expand=True)
         self.log_box = ctk.CTkTextbox(container, height=220, font=("Consolas", 12))
         self.log_box.pack(fill="both", expand=True)
         self.log_box.configure(state="disabled")
@@ -286,6 +318,7 @@ class MainWindow(ctk.CTk):
             self.logs.log("تنظیمات ذخیره شد. رمز عبور در config.json ذخیره نشده است.")
         else:
             self.logs.log("تنظیمات ذخیره شد. ذخیره امن رمز عبور غیرفعال بود.")
+        self._set_status("تنظیمات با موفقیت ذخیره شد", "success")
 
     def load_config(self) -> None:
         """Load settings from config.json and password from keyring."""
@@ -364,6 +397,8 @@ class MainWindow(ctk.CTk):
 
     def delete_saved_password(self) -> None:
         """Delete the saved password for the stable active profile id."""
+        if not messagebox.askyesno("حذف رمز", "رمز ذخیره‌شده برای این پروفایل حذف شود؟"):
+            return
         config = self._settings_from_ui()
         self.credentials.delete_password(config.profile_id)
         self.password_entry.delete(0, END)
@@ -374,6 +409,8 @@ class MainWindow(ctk.CTk):
         config = self._settings_from_ui()
         session_path = Path(config.browser.session_dir)
         if session_path.exists():
+            if not messagebox.askyesno("پاک‌کردن نشست", "نشست مرورگر پاک شود؟ در ورود بعدی احتمالاً باید دوباره وارد شوید."):
+                return
             rmtree(session_path)
             self.logs.log("نشست مرورگر پاک شد.")
         else:
@@ -383,6 +420,9 @@ class MainWindow(ctk.CTk):
         """Request the browser worker to stop."""
         self.stop_event.set()
         self.logs.log("درخواست توقف ارسال شد.")
+        self._set_status("در حال توقف…", "warning")
+        if self.stop_button is not None:
+            self.stop_button.configure(state="disabled")
 
     def _run_vadana_login(self, config: AppConfig, password: str) -> None:
         """Run the Vadana login worker without touching Tk widgets from the worker."""
@@ -435,13 +475,31 @@ class MainWindow(ctk.CTk):
         self.worker.start()
 
     def _set_running(self, running: bool) -> None:
-        state = "disabled" if running else "normal"
+        """Keep conflicting actions disabled while leaving Stop usable."""
         for button in getattr(self, "action_buttons", []):
-            button.configure(state=state)
+            button.configure(state="disabled" if running else "normal")
+        if self.stop_button is not None:
+            self.stop_button.configure(state="normal" if running else "disabled")
+        self._set_status("عملیات در حال اجرا است…" if running else "آماده", "running" if running else "ready")
+
+    def _set_status(self, message: str, kind: str = "ready") -> None:
+        """Show short, non-blocking feedback near the window title."""
+        colors = {"ready": "#45b97c", "success": "#45b97c", "running": "#4da3ff", "warning": "#f0a33a", "error": "#ef6461"}
+        symbols = {"ready": "●", "success": "✓", "running": "●", "warning": "●", "error": "!"}
+        if getattr(self, "run_status_label", None) is not None:
+            self.run_status_label.configure(text=f"{symbols.get(kind, '●')} {message}", text_color=colors.get(kind, colors["ready"]))
+
+    def clear_log(self) -> None:
+        """Clear only the on-screen log; local diagnostic files are preserved."""
+        self.log_box.configure(state="normal")
+        self.log_box.delete("1.0", "end")
+        self.log_box.configure(state="disabled")
+        self._set_status("گزارش روی صفحه پاک شد", "success")
 
     def _show_error(self, message: str) -> None:
         """Display and log a recoverable error."""
         self.logs.log(message)
+        self._set_status(message, "error")
         messagebox.showerror("خطا", message)
 
     def _poll_logs(self) -> None:

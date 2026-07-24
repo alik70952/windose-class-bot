@@ -1,20 +1,13 @@
 {
-  "site": {
-    "name": "University Website",
-    "login_url": "https://example.com/login"
-  },
+  "profile_name": "پروفایل نمونه",
+  "login_url": "https://example.com/login",
+  "username": "",
+  "class_name": "",
+  "adobe_connect_url": "",
   "browser": {
-    "name": "chrome",
     "headless": false,
-    "keep_open": true
-  },
-  "credentials": {
-    "username": "",
-    "password": ""
-  },
-  "class": {
-    "name": "",
-    "adobe_connect_url": ""
-  },
-  "steps": []
+    "keep_open": true,
+    "save_session": false,
+    "session_dir": "browser-session"
+  }
 }

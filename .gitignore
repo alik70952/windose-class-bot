@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+env/
+build/
+dist/
+*.spec
+
+# Application secrets and local state
+config.json
+.credentials*
+browser-session/
+playwright-session/
+*.log
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

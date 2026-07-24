@@ -1,10 +1,7 @@
-from src.bot import run_bot
+"""Application entry point for Windows Class Bot."""
 
-
-def main() -> None:
-    print("Windows Class Bot")
-    run_bot()
+from src.app import run_app
 
 
 if __name__ == "__main__":
-    main()
+    run_app()

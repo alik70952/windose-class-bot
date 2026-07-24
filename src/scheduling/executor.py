@@ -2,10 +2,9 @@
 from __future__ import annotations
 import threading, time
 from datetime import datetime
-from pathlib import Path
 from typing import Callable
 from src.browser.automation import BrowserAutomation
-from src.config.manager import ConfigManager
+from src.config.manager import ConfigManager, PROJECT_ROOT
 from src.notifications import notify
 from src.scheduling.manager import ScheduleManager
 from src.scheduling.models import ClassSchedule
@@ -33,7 +32,7 @@ class ScheduleExecutor:
     def _safe_log(self, schedule: ClassSchedule, message: str) -> None:
         clean = sanitize_diagnostic(message).replace("password", "[redacted]")
         self.log(clean)
-        d = Path("logs") / "schedules"; d.mkdir(parents=True, exist_ok=True)
+        d = PROJECT_ROOT / "logs" / "schedules"; d.mkdir(parents=True, exist_ok=True)
         with (d / f"{schedule.id}.log").open("a", encoding="utf-8") as fh:
             fh.write(f"{datetime.now().isoformat(timespec='seconds')} {clean}\n")
     def run(self, schedule_id: str, stop_event: threading.Event | None = None) -> bool:
@@ -41,7 +40,8 @@ class ScheduleExecutor:
         manager = ScheduleManager(self.config_manager)
         schedule = manager.get(schedule_id)
         if schedule is None:
-            self.log("زمان‌بندی پیدا نشد."); return False
+            self.log(f"زمان‌بندی پیدا نشد: {schedule_id} (config: {self.config_manager.path})")
+            return False
         self._safe_log(schedule, "اجرای زمان‌بندی آغاز شد")
         try:
             if not self._late_allowed(schedule):
@@ -63,6 +63,7 @@ class ScheduleExecutor:
             raise
         except Exception as exc:
             self._finish(schedule, manager, "Failed", sanitize_diagnostic(str(exc)))
+            self._safe_log(schedule, f"اجرای زمان‌بندی شکست خورد: {type(exc).__name__}: {exc}")
             notify("Windows Class Bot", schedule.last_error)
             return False
     def _late_allowed(self, schedule: ClassSchedule) -> bool:

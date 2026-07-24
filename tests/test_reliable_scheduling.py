@@ -6,7 +6,7 @@ import pytest
 from src.scheduling.models import ClassSchedule
 from src.scheduling.time_utils import convert_12h_to_24h, convert_24h_to_12h, actual_run_time, effective_for_weekday, next_run_datetime, format_12h
 import src.scheduling.windows_task_scheduler as windows_task_scheduler
-from src.scheduling.windows_task_scheduler import WindowsTaskScheduler, build_task_xml, build_run_command, project_root
+from src.scheduling.windows_task_scheduler import WindowsTaskScheduler, build_task_xml, build_run_command, format_run_command, project_root
 from src.scheduling.schedule_lock import ScheduleLock
 
 @pytest.mark.parametrize('h,m,p,out', [(12,0,'AM','00:00'),(12,0,'PM','12:00'),(1,0,'PM','13:00'),(11,59,'PM','23:59'),(12,30,'AM','00:30')])
@@ -52,6 +52,13 @@ def test_display_and_storage_formats():
 def test_command_credential_free():
     cmd=build_run_command('sid')
     assert '--run-schedule' in cmd and 'sid' in cmd and not any('password' in p.lower() for p in cmd)
+
+def test_windows_command_quotes_project_paths():
+    cmd = build_run_command('schedule-id', executable=r'C:\Program Files\Python\python.exe', script=r'C:\Class Bot\main.py')
+    rendered = format_run_command(cmd)
+    assert rendered == r'"C:\Program Files\Python\python.exe" "C:\Class Bot\main.py" --run-schedule schedule-id'
+    xml = build_task_xml(ClassSchedule(id='schedule-id'))
+    assert '<WorkingDirectory>' in xml and str(project_root()) in xml
 def test_am_pm_task_changes():
     am=ClassSchedule(id='a', class_start_time=convert_12h_to_24h(12,0,'AM'), start_time='00:00')
     pm=ClassSchedule(id='p', class_start_time=convert_12h_to_24h(12,0,'PM'), start_time='12:00')

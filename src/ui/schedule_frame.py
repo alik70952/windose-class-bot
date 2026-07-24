@@ -1,12 +1,19 @@
 """Schedule management frame separated from automation logic."""
 from __future__ import annotations
 from datetime import datetime, timedelta
+import subprocess
 import uuid
 import customtkinter as ctk
 from src.classes.presets import CLASS_PRESETS, ClassPreset
 from src.scheduling.manager import ScheduleManager
 from src.scheduling.models import ClassSchedule
-from src.scheduling.windows_task_scheduler import WindowsTaskScheduler
+from src.scheduling.windows_task_scheduler import (
+    WindowsTaskScheduler,
+    build_run_command,
+    format_run_command,
+    project_root,
+    sanitize_task_name,
+)
 
 
 class ScheduleFrame(ctk.CTkFrame):
@@ -14,6 +21,7 @@ class ScheduleFrame(ctk.CTkFrame):
     def __init__(self, master, config_manager, logs) -> None:
         super().__init__(master)
         self.manager = ScheduleManager(config_manager)
+        self.config_manager = config_manager
         self.logs = logs
         self.selected_id = ""
         self.class_var = ctk.StringVar(value=CLASS_PRESETS[0].name)
@@ -75,7 +83,10 @@ class ScheduleFrame(ctk.CTkFrame):
         when = datetime.now() + delay
         return ClassSchedule(
             id=uuid.uuid4().hex,
-            profile_id="vadana-sum39",
+            # Use the persisted profile identity.  A hard-coded value caused
+            # background runs to stop before BrowserAutomation for migrated or
+            # user-created profiles.
+            profile_id=self.config_manager.load().profile_id,
             class_name=self.class_var.get(),
             recurrence="once",
             date=when.date().isoformat(),
@@ -99,7 +110,19 @@ class ScheduleFrame(ctk.CTkFrame):
             return
         self.manager.upsert(s)
         self.selected_id = s.id
-        r = WindowsTaskScheduler().register(s)
+        scheduler = WindowsTaskScheduler()
+        r = scheduler.register(s)
+        command = build_run_command(s.id)
+        self.logs.log(f"Task name: {sanitize_task_name(s.id)}")
+        self.logs.log(f"schedule_id: {s.id}")
+        self.logs.log(f"Action Command: {command[0]}")
+        self.logs.log(f"Action Arguments: {subprocess.list2cmdline(command[1:])}")
+        self.logs.log(f"WorkingDirectory: {project_root()}")
+        self.logs.log(f"StartBoundary: {s.next_run}")
+        self.logs.log(f"config.json: {self.config_manager.path.resolve()}")
+        self.logs.log(f"Manual command: {format_run_command(command)}")
+        if r.success:
+            self.logs.log(f"Last Run Result: {scheduler.last_run_result(s.id).message}")
         self.logs.log("زمان‌بندی اجرا ثبت شد." if r.success else r.message)
         self.status_label.configure(text="زمان‌بندی ثبت شد." if r.success else r.message)
         self.refresh()

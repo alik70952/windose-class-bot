@@ -9,7 +9,11 @@ from pathlib import Path
 from typing import Any
 from src.scheduling.models import ClassSchedule
 
-CONFIG_PATH = Path("config.json")
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+# A scheduled process must not depend on the Task Scheduler service's current
+# directory.  Keeping this absolute also makes the CLI and GUI read the exact
+# same schedule store.
+CONFIG_PATH = PROJECT_ROOT / "config.json"
 VADANA_PROFILE_NAME = "وادانا واحد ۳۹"
 VADANA_LOGIN_URL = "https://vadana-sum39.ec.iau.ir/4043/login/index.php"
 VADANA_SITE_ADAPTER = "vadana_sum39"

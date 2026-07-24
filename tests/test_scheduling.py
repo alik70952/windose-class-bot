@@ -4,7 +4,7 @@ from pathlib import Path
 from unittest.mock import Mock
 import pytest
 from src.classes import CLASS_PRESETS
-from src.config.manager import ConfigManager, default_vadana_profile
+from src.config.manager import CONFIG_PATH, PROJECT_ROOT, ConfigManager, default_vadana_profile
 from src.scheduling.models import ClassSchedule
 from src.scheduling.time_utils import actual_run_time, validate_time, windows_weekday
 import src.scheduling.windows_task_scheduler as windows_task_scheduler
@@ -70,6 +70,10 @@ def test_config_migration_and_no_password(tmp_path: Path):
     p=tmp_path/'config.json'; p.write_text(json.dumps({'profile_name':'x','schedules':[{'class_name':'c','password':'secret'}]}),encoding='utf-8')
     c=ConfigManager(p).load(); assert c.schedules[0].class_name=='c'
     ConfigManager(p).save(c); assert 'secret' not in p.read_text(encoding='utf-8')
+
+def test_default_config_path_is_project_absolute():
+    assert CONFIG_PATH == PROJECT_ROOT / 'config.json'
+    assert CONFIG_PATH.is_absolute()
 
 def test_normalize_persian_variants():
     assert normalize_persian_text('عربي ي ك ۱۲') == normalize_persian_text('عربی ی ک 12')

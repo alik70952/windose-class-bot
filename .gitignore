@@ -21,3 +21,4 @@ playwright-session/
 Thumbs.db
 .vscode/
 .idea/
+logs/

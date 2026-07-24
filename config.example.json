@@ -1,13 +1,15 @@
 {
-  "profile_name": "پروفایل نمونه",
-  "login_url": "https://example.com/login",
+  "profile_name": "وادانا واحد ۳۹",
+  "login_url": "https://vadana-sum39.ec.iau.ir/4043/login/index.php",
   "username": "",
   "class_name": "",
   "adobe_connect_url": "",
+  "site_adapter": "vadana_sum39",
+  "profile_id": "vadana-sum39",
   "browser": {
     "headless": false,
     "keep_open": true,
-    "save_session": false,
-    "session_dir": "browser-session"
+    "save_session": true,
+    "session_dir": "browser-session/vadana-sum39"
   }
 }

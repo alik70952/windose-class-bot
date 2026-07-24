@@ -4,10 +4,11 @@ from __future__ import annotations
 import argparse
 import sys
 import traceback
-from pathlib import Path
 from tkinter import messagebox
 
-STARTUP_LOG_PATH = Path("logs") / "startup-error.log"
+from src.config.manager import PROJECT_ROOT
+
+STARTUP_LOG_PATH = PROJECT_ROOT / "logs" / "startup-error.log"
 STARTUP_ERROR_MESSAGE = "برنامه هنگام راه‌اندازی با خطا مواجه شد."
 
 

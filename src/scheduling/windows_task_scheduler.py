@@ -1,6 +1,10 @@
 """Safe Windows Task Scheduler wrapper using XML and argument lists only."""
 from __future__ import annotations
-import re, subprocess, sys, tempfile, xml.etree.ElementTree as ET
+import re
+import subprocess
+import sys
+import tempfile
+import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from pathlib import Path
 from src.scheduling.models import ClassSchedule
@@ -19,6 +23,11 @@ def build_run_command(schedule_id: str, executable: str | None = None, script: s
     exe = executable or (str(venv) if venv.exists() else sys.executable)
     if getattr(sys, "frozen", False): return [exe, "--run-schedule", schedule_id]
     return [exe, script or str(root / "main.py"), "--run-schedule", schedule_id]
+
+
+def format_run_command(command: list[str]) -> str:
+    """Return the exact Windows command line represented by an action."""
+    return subprocess.list2cmdline(command)
 
 def build_task_xml(schedule: ClassSchedule) -> str:
     if not schedule.effective_run_time:
@@ -41,7 +50,10 @@ def build_task_xml(schedule: ClassSchedule) -> str:
     for k,v in {"MultipleInstancesPolicy":"IgnoreNew","DisallowStartIfOnBatteries":"false","StopIfGoingOnBatteries":"false","AllowHardTerminate":"true","StartWhenAvailable":"true","RunOnlyIfNetworkAvailable":"false","WakeToRun":"true","Enabled":str(schedule.enabled).lower(),"ExecutionTimeLimit":"PT2H"}.items(): ET.SubElement(settings, f"{{{ns}}}{k}").text=v
     restart=ET.SubElement(settings, f"{{{ns}}}RestartOnFailure"); ET.SubElement(restart, f"{{{ns}}}Interval").text="PT1M"; ET.SubElement(restart, f"{{{ns}}}Count").text="3"
     actions=ET.SubElement(task, f"{{{ns}}}Actions", {"Context":"Author"}); ex=ET.SubElement(actions, f"{{{ns}}}Exec")
-    cmd=build_run_command(schedule.id); ET.SubElement(ex, f"{{{ns}}}Command").text=cmd[0]; ET.SubElement(ex, f"{{{ns}}}Arguments").text=" ".join(f'\"{a}\"' if ' ' in a else a for a in cmd[1:]); ET.SubElement(ex, f"{{{ns}}}WorkingDirectory").text=str(project_root())
+    cmd=build_run_command(schedule.id)
+    ET.SubElement(ex, f"{{{ns}}}Command").text=cmd[0]
+    ET.SubElement(ex, f"{{{ns}}}Arguments").text=subprocess.list2cmdline(cmd[1:])
+    ET.SubElement(ex, f"{{{ns}}}WorkingDirectory").text=str(project_root())
     return ET.tostring(task, encoding="unicode")
 
 class WindowsTaskScheduler:
@@ -49,6 +61,11 @@ class WindowsTaskScheduler:
     def register(self, schedule: ClassSchedule) -> TaskResult:
         if schedule.recurrence == "weekly": schedule.effective_run_time, schedule.effective_run_weekday = effective_for_weekday(schedule.weekday, schedule.class_start_time or schedule.start_time, schedule.early_minutes)
         elif schedule.date: schedule.effective_run_time, schedule.effective_run_date = effective_for_date(schedule.date, schedule.class_start_time or schedule.start_time, schedule.early_minutes)
+        command = build_run_command(schedule.id)
+        if not Path(command[0]).is_file():
+            return TaskResult(False, f"Python زمان‌بندی پیدا نشد: {command[0]}", command)
+        if not getattr(sys, "frozen", False) and not Path(command[1]).is_file():
+            return TaskResult(False, f"main.py پیدا نشد: {command[1]}", command)
         xml = build_task_xml(schedule); task = sanitize_task_name(schedule.id)
         if not is_windows(): return TaskResult(False, "ثبت Task فقط روی Windows قابل اجراست.", ["schtasks.exe","/Create","/XML","<xml>","/TN",task], xml)
         with tempfile.NamedTemporaryFile("w", suffix=".xml", delete=False, encoding="utf-16") as f: f.write(xml); path=f.name
@@ -60,6 +77,16 @@ class WindowsTaskScheduler:
         args=["schtasks.exe","/Query","/TN",sanitize_task_name(schedule.id),"/XML"]
         c=self.runner(args,capture_output=True,text=True,check=False)
         return TaskResult(c.returncode==0, c.stderr.strip() or c.stdout.strip(), args)
+    def last_run_result(self, schedule_id: str) -> TaskResult:
+        """Read Task Scheduler's numeric LastTaskResult without locale parsing."""
+        task = sanitize_task_name(schedule_id)
+        if not is_windows():
+            return TaskResult(False, "Last Run Result فقط روی Windows قابل دریافت است.", [])
+        command = f"(Get-ScheduledTaskInfo -TaskName '{task}').LastTaskResult"
+        args = ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", command]
+        completed = self.runner(args, capture_output=True, text=True, check=False)
+        message = completed.stderr.strip() or completed.stdout.strip() or "نامشخص"
+        return TaskResult(completed.returncode == 0, message, args)
     def delete(self, schedule_id: str) -> TaskResult:
         if not is_windows(): return TaskResult(False, "حذف Task فقط روی Windows قابل اجراست.", [])
         args=["schtasks.exe","/Delete","/F","/TN",sanitize_task_name(schedule_id)]; c=self.runner(args,capture_output=True,text=True,check=False)

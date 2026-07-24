@@ -1,6 +1,7 @@
 """Small headless checks for the UI state-management helpers."""
 
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 
@@ -67,3 +68,29 @@ def test_one_hour_shortcut_normalizes_delay_fields() -> None:
 
     assert frame.delay_hours_var.value == "1"
     assert frame.delay_minutes_var.value == "0"
+
+
+def test_schedule_save_checks_worker_outside_ui_thread(monkeypatch) -> None:
+    frame = SimpleNamespace(
+        _schedule_from_form=Mock(return_value=SimpleNamespace(
+            id="job", profile_id="profile", class_name="class", next_run="2026-07-24T04:00:00"
+        )),
+        config_manager=SimpleNamespace(load=Mock(return_value=SimpleNamespace(
+            profile_id="profile", username="user"
+        ))),
+        store=SimpleNamespace(create=Mock(return_value=SimpleNamespace(id="job"))),
+        _delay=Mock(return_value=__import__("datetime").timedelta(minutes=5)),
+        logs=SimpleNamespace(log=Mock()),
+        status_label=FakeWidget(),
+        _check_worker_after_save=Mock(),
+        selected_id="",
+    )
+    monkeypatch.setattr("src.ui.schedule_frame.CredentialStore.get_password", lambda *_: "secret")
+    thread = Mock()
+    monkeypatch.setattr("src.ui.schedule_frame.threading.Thread", Mock(return_value=thread))
+
+    ScheduleFrame.save(frame)
+
+    thread.start.assert_called_once_with()
+    frame._check_worker_after_save.assert_not_called()
+    assert "پس‌زمینه" in frame.status_label.options["text"]

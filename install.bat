@@ -81,13 +81,10 @@ if errorlevel 1 (call :fail 1 "Startup import check" & exit /b 1)
 "%VENV_PY%" -m compileall "main.py" "src"
 if errorlevel 1 (call :fail 1 "compileall" & exit /b 1)
 
-"%VENV_PY%" -c "import importlib.util, sys; sys.exit(0 if importlib.util.find_spec('pytest') else 2)"
-if errorlevel 1 (
-    echo pytest is not installed; skipping tests.
-) else (
-    "%VENV_PY%" -m pytest -q
-    if errorlevel 1 (call :fail 1 "pytest" & exit /b 1)
-)
+rem The installer deliberately does not run the developer test suite.  Apart
+rem from making installation much slower, UI/process tests can briefly open
+rem extra Windows.  Developers can run ".venv\Scripts\python -m pytest -q"
+rem explicitly when they need it.
 
 echo Registering the persistent background scheduler worker...
 for /f "tokens=1,* delims=," %%A in ('schtasks.exe /Query /FO CSV /V /NH 2^>nul') do (

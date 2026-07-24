@@ -161,16 +161,10 @@ Presetها فقط مقدار اولیه هستند. کاربر می‌تواند
 
 برای اجرای زمان‌بندی حتی وقتی رابط اصلی باز نیست، برنامه روی Windows از `schtasks.exe` با `subprocess` و آرگومان‌های List استفاده می‌کند و از `shell=True` استفاده نمی‌کند. Task با نام امن `WindowsClassBot_<schedule_id>` ساخته می‌شود و نام خام کلاس، نام کاربری، رمز عبور، Cookie یا Token در نام Task یا Command Line قرار نمی‌گیرد.
 
-نمونه اجرای CLI:
+Task مستقیماً Runner همگام و مستقل را با Python بدون پنجره اجرا می‌کند؛ این مسیر رابط گرافیکی و `main.py` را Import نمی‌کند:
 
 ```powershell
-python main.py --run-schedule <schedule_id>
-```
-
-در نسخه PyInstaller:
-
-```powershell
-WindowsClassBot.exe --run-schedule <schedule_id>
+.venv\Scripts\pythonw.exe src\scheduled_runner.py <schedule_id>
 ```
 
 حذف زمان‌بندی از UI، رکورد محلی را حذف می‌کند. حذف از Windows Task Scheduler نیز Task متناظر با schedule_id امن را حذف می‌کند. اگر ثبت یا حذف Task به سطح دسترسی بیشتر نیاز داشته باشد، برنامه پیام فارسی خوانا ثبت می‌کند و نباید Crash کند.
@@ -228,6 +222,6 @@ git diff --check
 1. کلاس: `12:00 PM`، ورود زودتر: `0` دقیقه، زمان Task: `12:00 ظهر`.
 2. کلاس: `12:00 PM`، ورود زودتر: `10` دقیقه، زمان Task: `11:50 AM`.
 3. کلاس: `12:00 AM`، ورود زودتر: `10` دقیقه، زمان Task: `روز قبل، 11:50 PM`.
-4. برای آزمایش، دکمه «آزمایش زمان‌بندی در 2 دقیقه آینده» یک Schedule با برچسب `test_schedule` می‌سازد، Task واقعی Windows را برای دو دقیقه بعد با مسیر `main.py --run-schedule <schedule_id>` ثبت می‌کند، می‌توانید برنامه را ببندید، سپس Task باید Chrome را باز کند، Credential را از Windows Credential Manager بخواند، وارد وادانا شود، کلاس ثابت انتخاب‌شده را باز کند و مسیر Adobe Connect را آزمایش کند. پس از اجرا، Task آزمایشی پاک یا غیرفعال می‌شود.
+4. زمان‌بندی دو دقیقه‌ای یک Task واقعی Windows با مسیر `pythonw.exe src\scheduled_runner.py <schedule_id>` ثبت می‌کند؛ می‌توانید برنامه را ببندید و در زمان اجرا هیچ پنجره CMD نمایش داده نمی‌شود. Runner سپس Chrome را باز می‌کند، Credential را از Windows Credential Manager می‌خواند، وارد وادانا می‌شود، کلاس ثابت انتخاب‌شده را باز می‌کند و مسیر Adobe Connect را اجرا می‌کند.
 
-Taskهای Windows با XML امن ساخته می‌شوند: `InteractiveToken` برای اجرای تعاملی، `StartWhenAvailable=true`، `WakeToRun=true`، `MultipleInstancesPolicy=IgnoreNew`، اجرای مجاز روی باتری، عدم توقف هنگام تغییر به باتری، محدودیت اجرای حدود دو ساعت، Retry تا سه مرتبه با فاصله یک دقیقه، فرمان جدا از آرگومان‌ها، و `WorkingDirectory` برابر ریشه پروژه. Command Line فقط شامل Python محیط مجازی پروژه، `main.py`، `--run-schedule` و `schedule_id` امن است و Password، Cookie، Token یا URL کامل جلسه در Schedule، Task، XML، Command یا Log ذخیره نمی‌شود.
+Taskهای Windows با XML امن ساخته می‌شوند: `InteractiveToken` برای اجرای Chrome در نشست کاربر، `StartWhenAvailable=true`، `WakeToRun=true`، `MultipleInstancesPolicy=IgnoreNew`، اجرای مجاز روی باتری، عدم توقف هنگام تغییر به باتری، محدودیت اجرای حدود دو ساعت، Retry تا سه مرتبه با فاصله یک دقیقه، فرمان جدا از آرگومان‌ها، و `WorkingDirectory` برابر ریشه پروژه. Action مستقیماً `pythonw.exe` محیط مجازی را روی `src/scheduled_runner.py` اجرا می‌کند و فقط `schedule_id` امن را می‌فرستد؛ Password، Cookie، Token یا URL کامل جلسه در Task، XML، Command یا Log ذخیره نمی‌شود. خطاهای Bootstrap که پیش از Executor رخ دهند در `logs/scheduled-runner-error.log` ثبت می‌شوند.

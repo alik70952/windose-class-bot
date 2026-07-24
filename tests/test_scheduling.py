@@ -64,7 +64,7 @@ def test_safe_task_name_and_command_has_no_credential():
     s='abc; شماره 123'; name=sanitize_task_name(s)
     assert name.startswith('WindowsClassBot_') and ';' not in name and 'شماره' not in name
     cmd=build_run_command('fake-id')
-    assert '--run-schedule' in cmd and 'password' not in ' '.join(cmd).lower()
+    assert 'scheduled_runner.py' in ' '.join(cmd) and cmd[-1] == 'fake-id' and 'password' not in ' '.join(cmd).lower()
 
 def test_config_migration_and_no_password(tmp_path: Path):
     p=tmp_path/'config.json'; p.write_text(json.dumps({'profile_name':'x','schedules':[{'class_name':'c','password':'secret'}]}),encoding='utf-8')

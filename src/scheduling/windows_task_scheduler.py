@@ -19,10 +19,15 @@ def project_root() -> Path: return Path(__file__).resolve().parents[2]
 def sanitize_task_name(schedule_id: str) -> str:
     return f"WindowsClassBot_{(re.sub(r'[^A-Za-z0-9_-]', '_', schedule_id)[:64] or 'schedule')}"
 def build_run_command(schedule_id: str, executable: str | None = None, script: str | None = None) -> list[str]:
-    root = project_root(); venv = root / ".venv" / "Scripts" / "python.exe"
-    exe = executable or (str(venv) if venv.exists() else sys.executable)
-    if getattr(sys, "frozen", False): return [exe, "--run-schedule", schedule_id]
-    return [exe, script or str(root / "main.py"), "--run-schedule", schedule_id]
+    """Build the direct, console-free scheduled-runner action.
+
+    ``pythonw.exe`` is intentional: using python.exe/main.py made Task Scheduler
+    create a transient console and unnecessarily imported the GUI launcher.
+    """
+    root = project_root()
+    pythonw = root / ".venv" / "Scripts" / "pythonw.exe"
+    exe = executable or (str(pythonw) if pythonw.exists() else sys.executable)
+    return [exe, script or str(root / "src" / "scheduled_runner.py"), schedule_id]
 
 
 def format_run_command(command: list[str]) -> str:
@@ -64,12 +69,14 @@ class WindowsTaskScheduler:
         command = build_run_command(schedule.id)
         if not Path(command[0]).is_file():
             return TaskResult(False, f"Python زمان‌بندی پیدا نشد: {command[0]}", command)
-        if not getattr(sys, "frozen", False) and not Path(command[1]).is_file():
-            return TaskResult(False, f"main.py پیدا نشد: {command[1]}", command)
+        if not Path(command[1]).is_file():
+            return TaskResult(False, f"Runner زمان‌بندی پیدا نشد: {command[1]}", command)
         xml = build_task_xml(schedule); task = sanitize_task_name(schedule.id)
         if not is_windows(): return TaskResult(False, "ثبت Task فقط روی Windows قابل اجراست.", ["schtasks.exe","/Create","/XML","<xml>","/TN",task], xml)
         with tempfile.NamedTemporaryFile("w", suffix=".xml", delete=False, encoding="utf-16") as f: f.write(xml); path=f.name
-        args=["schtasks.exe","/Create","/F","/TN",task,"/XML",path] + (["/IT"] if schedule.launch_adobe_connect else [])
+        # InteractiveToken is defined in the XML.  Mixing /IT with /XML is
+        # redundant and can produce inconsistent registrations across Windows.
+        args=["schtasks.exe","/Create","/F","/TN",task,"/XML",path]
         c=self.runner(args,capture_output=True,text=True,check=False)
         return TaskResult(c.returncode==0, c.stderr.strip() or c.stdout.strip() or "Task ثبت شد.", args, xml)
     def verify(self, schedule: ClassSchedule) -> TaskResult:

@@ -19,10 +19,12 @@ def sanitize_task_name(schedule_id: str) -> str:
 
 def build_run_command(schedule_id: str, executable: str | None = None, script: str | None = None) -> list[str]:
     """Build a credential-free command line for scheduled background execution."""
-    exe = executable or (sys.executable if not getattr(sys, "frozen", False) else sys.executable)
+    project_root = os.getcwd()
+    venv_python = os.path.join(project_root, ".venv", "Scripts", "python.exe")
+    exe = executable or (venv_python if os.path.exists(venv_python) else (sys.executable if not getattr(sys, "frozen", False) else sys.executable))
     if getattr(sys, "frozen", False):
         return [exe, "--run-schedule", schedule_id]
-    return [exe, script or os.path.abspath("main.py"), "--run-schedule", schedule_id]
+    return [exe, script or os.path.join(project_root, "main.py"), "--run-schedule", schedule_id]
 
 class WindowsTaskScheduler:
     """Register/delete class schedules in Windows without shell=True."""
@@ -36,6 +38,8 @@ class WindowsTaskScheduler:
         cmd = " ".join(f'"{p}"' if " " in p else p for p in build_run_command(schedule.id))
         sc = "WEEKLY" if schedule.recurrence == "weekly" else "ONCE"
         args = ["schtasks.exe", "/Create", "/F", "/TN", task, "/TR", cmd, "/SC", sc, "/ST", run_time]
+        if schedule.launch_adobe_connect:
+            args += ["/IT"]
         if sc == "WEEKLY": args += ["/D", windows_weekday(schedule.weekday)]
         completed = self.runner(args, capture_output=True, text=True, check=False)
         return TaskResult(completed.returncode == 0, completed.stderr.strip() or completed.stdout.strip() or "Task ثبت شد.", args)

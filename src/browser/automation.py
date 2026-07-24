@@ -19,6 +19,7 @@ from src.config.manager import AppConfig, BrowserSettings
 from src.config.manager import VADANA_LOGIN_URL, VADANA_SITE_ADAPTER
 from src.sites import get_adapter
 from src.sites.vadana_sum39 import sanitize_diagnostic
+from src.browser.adobe_connect import AdobeConnectLauncher
 
 LogCallback = Callable[[str], None]
 
@@ -75,7 +76,7 @@ class BrowserAutomation:
         return False
 
 
-    def login_and_enter_class(self, config: AppConfig, password: str, timeout_ms: int = 900_000, launch_adobe_connect: bool = True) -> bool:
+    def login_and_enter_class(self, config: AppConfig, password: str, timeout_ms: int = 900_000, launch_adobe_connect: bool = True, adobe_launch_wait_seconds: int = 20) -> bool:
         """Run the full Vadana class flow; opening a URL alone is never success."""
         self.log("اجرای کامل ربات آغاز شد")
         self._validate_full_flow_inputs(config, password)
@@ -86,6 +87,7 @@ class BrowserAutomation:
         playwright_manager = None
         playwright = None
         active_page = None
+        result_status = ""
         keep_open = config.browser.keep_open and not config.browser.headless
         try:
             adapter = get_adapter(config.site_adapter)
@@ -117,12 +119,16 @@ class BrowserAutomation:
             self._check_stop()
             self.log("در حال بررسی لینک ورود به کلاس")
             active_page = adapter.enter_online_class(page, config.class_name, timeout_ms, self.stop_event)
-            self.log("درخواست ورود به کلاس ارسال شد")
+            self.log("در انتظار پاسخ صفحه کلاس")
+            result_status = self._handle_adobe_connect(context, active_page, launch_adobe_connect, adobe_launch_wait_seconds)
+            if result_status not in {"adobe_connect_launched", "browser_meeting_opened", "needs_user_action"}:
+                raise RuntimeError(result_status)
 
-            if launch_adobe_connect and config.adobe_connect_url:
+            if False and launch_adobe_connect and config.adobe_connect_url:
                 self.log("در صورت نیاز Adobe Connect توسط لینک کلاس یا آدرس تنظیم‌شده باز می‌شود")
                 active_page.goto(config.adobe_connect_url, wait_until="domcontentloaded", timeout=60_000)
 
+            self.log(result_status)
             self.log("جریان کامل ربات با موفقیت انجام شد")
             if keep_open and not self.stop_event.is_set():
                 self._wait_for_browser_to_stay_open(active_page or page)
@@ -134,7 +140,7 @@ class BrowserAutomation:
                 self._wait_for_browser_to_stay_open(active_page)
             raise
         finally:
-            should_close = not keep_open or self.stop_event.is_set()
+            should_close = (not keep_open and result_status not in {"needs_user_action", "browser_meeting_opened"}) or self.stop_event.is_set()
             if should_close:
                 if context is not None:
                     try:
@@ -155,6 +161,41 @@ class BrowserAutomation:
                     except Exception:
                         pass
 
+
+    def _handle_adobe_connect(self, context, page, launch_adobe_connect: bool, wait_seconds: int) -> str:
+        if not launch_adobe_connect:
+            self.log("اجرای Adobe Connect غیرفعال است؛ صفحه جلسه در مرورگر باز می‌ماند.")
+            return "browser_meeting_opened"
+        launcher = AdobeConnectLauncher()
+        pages = list(getattr(context, "pages", []) or [page])
+        self.log("Tab یا Popup جلسه بررسی شد")
+        for p in pages:
+            try:
+                p.wait_for_load_state("domcontentloaded", timeout=5000)
+            except Exception:
+                pass
+            url = getattr(p, "url", "")
+            if url.startswith(("http://", "https://")) and ("adobeconnect" in url.lower() or "connect" in url.lower()):
+                self.log("صفحه جلسه در مرورگر باز شد")
+                return "browser_meeting_opened"
+            try:
+                links = p.locator("a[href]")
+                for i in range(min(links.count(), 50)):
+                    href = links.nth(i).get_attribute("href", timeout=500)
+                    if href and launcher.is_valid_uri(href):
+                        self.log("لینک اجرای Adobe Connect شناسایی شد")
+                        r = launcher.launch_uri(href)
+                        self.log(r.message)
+                        self.log("در انتظار اجرای Adobe Connect…")
+                        status = launcher.wait_for_launch(wait_seconds, self.stop_event)
+                        if status == "adobe_connect_launch_timeout" and r.status == "needs_user_action":
+                            self.log("برای ادامه، تأیید دستی کاربر لازم است")
+                            return "needs_user_action"
+                        return status
+            except Exception:
+                continue
+        self.log("درخواست بازکردن Adobe Connect ارسال شد. در صورت نمایش پیام Windows یا Chrome، گزینه Open Adobe Connect را تأیید کنید.")
+        return "needs_user_action"
 
     def _wait_for_browser_to_stay_open(self, page) -> None:
         """Keep Playwright and Chrome alive until the user closes Chrome or stops the worker."""

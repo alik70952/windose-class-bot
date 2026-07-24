@@ -19,6 +19,7 @@ RUN_STATUS_LABELS: dict[str, str] = {
 class ClassSchedule:
     """Credential-free class schedule persisted in local config."""
     id: str = field(default_factory=lambda: uuid.uuid4().hex)
+    date: str = ""
     name: str = ""
     profile_id: str = "vadana-sum39"
     class_name: str = ""
@@ -34,12 +35,41 @@ class ClassSchedule:
     retry_count: int = 2
     retry_delay_seconds: int = 30
     class_entry_timeout_seconds: int = 900
+    adobe_launch_wait_seconds: int = 20
     created_at: str = field(default_factory=lambda: datetime.now().isoformat(timespec="seconds"))
     updated_at: str = field(default_factory=lambda: datetime.now().isoformat(timespec="seconds"))
     last_run_at: str = ""
     last_run_status: str = "Pending"
     last_error: str = ""
     windows_task_name: str = ""
+
+    @property
+    def schedule_id(self) -> str:
+        return self.id
+
+    @property
+    def schedule_type(self) -> str:
+        return self.recurrence
+
+    @schedule_type.setter
+    def schedule_type(self, value: str) -> None:
+        self.recurrence = value  # type: ignore[assignment]
+
+    @property
+    def wait_timeout_minutes(self) -> int:
+        return max(1, self.class_entry_timeout_seconds // 60)
+
+    @wait_timeout_minutes.setter
+    def wait_timeout_minutes(self, value: int) -> None:
+        self.class_entry_timeout_seconds = int(value) * 60
+
+    @property
+    def last_run(self) -> str:
+        return self.last_run_at
+
+    @property
+    def last_status(self) -> str:
+        return self.last_run_status
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize without credentials."""

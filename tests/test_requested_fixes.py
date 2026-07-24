@@ -29,6 +29,14 @@ def test_task_uses_schedule_id_and_interactive_for_adobe(monkeypatch):
     assert runner.call_args.kwargs.get("check") is False
 
 
+def test_installer_retries_worker_registration_with_uac():
+    installer = (Path(__file__).parents[1] / "install.bat").read_text(encoding="utf-8")
+    assert "Start-Process" in installer
+    assert "-Verb RunAs" in installer
+    assert "-Wait -PassThru" in installer
+    assert "VADANA_WORKER_PY" in installer
+
+
 def test_adobe_uri_validation_and_safe_launch(monkeypatch):
     calls = []
     launcher = AdobeConnectLauncher(startfile=calls.append, process_checker=lambda: True)

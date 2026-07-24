@@ -94,7 +94,18 @@ for /f "tokens=1,* delims=," %%A in ('schtasks.exe /Query /FO CSV /V /NH 2^>nul'
     echo %%A %%B | findstr /I /C:"VadanaClassBot-" /C:"scheduled_runner.py" /C:"schedule_worker.py" /C:"cmd.exe" /C:"run.bat" /C:"main.py" >nul && schtasks.exe /Delete /F /TN %%~A >nul 2>nul
 )
 "%VENV_PY%" main.py --install-worker
-if errorlevel 1 (call :fail 1 "Worker registration" & exit /b 1)
+if errorlevel 1 (
+    echo.
+    echo Windows denied the initial Task Scheduler registration.
+    echo Requesting administrator approval for this step only...
+    set "VADANA_WORKER_PY=%CD%\%VENV_PY%"
+    set "VADANA_PROJECT_ROOT=%CD%"
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$process = Start-Process -FilePath $env:VADANA_WORKER_PY -ArgumentList @('main.py','--install-worker') -WorkingDirectory $env:VADANA_PROJECT_ROOT -Verb RunAs -Wait -PassThru; exit $process.ExitCode"
+    if errorlevel 1 (
+        echo Worker registration still failed. Approve the Windows UAC prompt, or run install.bat as Administrator.
+        call :fail 1 "Worker registration" & exit /b 1
+    )
+)
 
 echo Installation completed successfully.
 echo Run run.bat to start the application.

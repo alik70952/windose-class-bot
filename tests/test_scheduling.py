@@ -7,6 +7,7 @@ from src.classes import CLASS_PRESETS
 from src.config.manager import ConfigManager, default_vadana_profile
 from src.scheduling.models import ClassSchedule
 from src.scheduling.time_utils import actual_run_time, validate_time, windows_weekday
+import src.scheduling.windows_task_scheduler as windows_task_scheduler
 from src.scheduling.windows_task_scheduler import build_run_command, sanitize_task_name, WindowsTaskScheduler
 from src.scheduling.executor import should_retry
 from src.scheduling.profile_lock import ProfileLock
@@ -111,7 +112,7 @@ def test_cli_fake_id(monkeypatch):
     assert main()==1
 
 def test_task_scheduler_mock(monkeypatch):
-    monkeypatch.setattr('os.name','nt')
+    monkeypatch.setattr(windows_task_scheduler, 'is_windows', lambda: True)
     runner=Mock(return_value=Mock(returncode=0,stdout='ok',stderr=''))
     r=WindowsTaskScheduler(runner).register(ClassSchedule(id='abc', weekday='شنبه'))
     assert r.success; assert runner.call_args[0][0][0]=='schtasks.exe'

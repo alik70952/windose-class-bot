@@ -1,10 +1,11 @@
 from __future__ import annotations
 from datetime import datetime, timedelta
 from unittest.mock import Mock
-import os, re
+import re
 import pytest
 from src.scheduling.models import ClassSchedule
 from src.scheduling.time_utils import convert_12h_to_24h, convert_24h_to_12h, actual_run_time, effective_for_weekday, next_run_datetime, format_12h
+import src.scheduling.windows_task_scheduler as windows_task_scheduler
 from src.scheduling.windows_task_scheduler import WindowsTaskScheduler, build_task_xml, build_run_command, project_root
 from src.scheduling.schedule_lock import ScheduleLock
 
@@ -20,7 +21,7 @@ def test_early_and_previous_day():
     assert actual_run_time('00:05',10)==('23:55',-1)
     assert effective_for_weekday('دوشنبه','00:05',10)==('23:55','یکشنبه')
 def test_task_uses_effective_time_and_settings(monkeypatch):
-    monkeypatch.setattr(os, 'name', 'nt', raising=False)
+    monkeypatch.setattr(windows_task_scheduler, 'is_windows', lambda: True)
     runner=Mock(return_value=Mock(returncode=0,stdout='ok',stderr=''))
     s=ClassSchedule(id='abc', class_start_time='12:00', start_time='12:00', early_minutes=10, launch_adobe_connect=True)
     r=WindowsTaskScheduler(runner).register(s)

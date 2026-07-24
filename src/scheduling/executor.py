@@ -2,6 +2,7 @@
 from __future__ import annotations
 import threading, time
 from datetime import datetime
+from pathlib import Path
 from typing import Callable
 from src.browser.automation import BrowserAutomation
 from src.config.manager import ConfigManager
@@ -9,6 +10,8 @@ from src.notifications import notify
 from src.scheduling.manager import ScheduleManager
 from src.scheduling.models import ClassSchedule
 from src.scheduling.profile_lock import ProfileLock
+from src.scheduling.time_utils import is_too_late
+from src.scheduling.windows_task_scheduler import WindowsTaskScheduler
 from src.sites.vadana_sum39 import CourseSelectionError, sanitize_diagnostic
 from src.security.credentials import CredentialStore
 
@@ -32,11 +35,18 @@ class ScheduleExecutor:
         schedule = manager.get(schedule_id)
         if schedule is None:
             self.log("زمان‌بندی پیدا نشد."); return False
+        self._attach_file_log(schedule_id)
         self.log("اجرای زمان‌بندی آغاز شد")
+        if is_too_late(schedule):
+            self._finish(schedule, manager, "missed_schedule_too_late", "زمان اجرای کلاس بیش از حد مجاز گذشته است و ربات وارد کلاس نشد.")
+            self.log(schedule.last_error); return False
         try:
-            with ProfileLock(schedule.profile_id):
+            with ProfileLock(schedule.id):
                 self.log("زمان محلی اجرا تأیید شد")
                 return self._run_with_retry(schedule, stop_event, manager)
+        except RuntimeError as exc:
+            self._finish(schedule, manager, "already_running", "اجرای دیگری از این زمان‌بندی در حال انجام است.")
+            self.log(schedule.last_error); return False
         except Exception as exc:
             self._finish(schedule, manager, "Failed", sanitize_diagnostic(str(exc)))
             notify("Windows Class Bot", schedule.last_error)
@@ -76,5 +86,20 @@ class ScheduleExecutor:
         schedule.last_run_status = "Completed" if status == "Success" and schedule.recurrence == "once" else status
         if status == "Success" and schedule.recurrence == "once":
             schedule.enabled = False
+            WindowsTaskScheduler().delete(schedule.id)
+        if schedule.is_test:
+            WindowsTaskScheduler().delete(schedule.id)
         schedule.last_error = error
         manager.upsert(schedule)
+
+    def _attach_file_log(self, schedule_id: str) -> None:
+        """Mirror schedule execution logs to logs/schedules/<schedule_id>.log without secrets."""
+        base_log = self.log
+        path = Path("logs") / "schedules" / f"{schedule_id}.log"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        def both(message: str) -> None:
+            safe = sanitize_diagnostic(str(message))
+            base_log(safe)
+            with path.open("a", encoding="utf-8") as fh:
+                fh.write(f"{datetime.now().isoformat(timespec='seconds')} {safe}\n")
+        self.log = both

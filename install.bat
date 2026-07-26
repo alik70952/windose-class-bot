@@ -63,16 +63,9 @@ if errorlevel 1 (call :fail 1 "Install requirements" & exit /b 1)
 if "%SKIP_BROWSER%"=="1" (
     echo Skipping Playwright browser installation by request.
 ) else (
-    echo Installing Google Chrome for Playwright because the project launches Playwright with channel="chrome".
-    "%VENV_PY%" -m playwright install chrome
-    if errorlevel 1 (call :fail 1 "Playwright Google Chrome installation" & exit /b 1)
-)
-
-call :check_chrome
-if errorlevel 1 (
-    echo Google Chrome was not found in common Windows install paths.
-    echo The app UI can start, but browser automation requires Google Chrome because channel="chrome" is used.
-    echo Install Google Chrome or run install.bat without --skip-browser.
+    echo Installing the browser required by the automation...
+    "%VENV_PY%" -m playwright install chromium
+    if errorlevel 1 (call :fail 1 "Playwright browser installation" & exit /b 1)
 )
 
 "%VENV_PY%" -c "import customtkinter; import playwright; import keyring; import src.app"
@@ -104,16 +97,13 @@ if errorlevel 1 (
     )
 )
 
+"%VENV_PY%" -c "import hashlib,pathlib; pathlib.Path(r'%VENV_DIR%\.install-complete').write_text(hashlib.sha256(pathlib.Path('requirements.txt').read_bytes()).hexdigest(), encoding='ascii')"
+if errorlevel 1 (call :fail 1 "Installation completion marker" & exit /b 1)
+
 echo Installation completed successfully.
 echo Run run.bat to start the application.
 if not "%NO_PAUSE%"=="1" pause
 exit /b 0
-
-:check_chrome
-if exist "%ProgramFiles%\Google\Chrome\Application\chrome.exe" exit /b 0
-if exist "%ProgramFiles(x86)%\Google\Chrome\Application\chrome.exe" exit /b 0
-if exist "%LocalAppData%\Google\Chrome\Application\chrome.exe" exit /b 0
-exit /b 1
 
 :fail
 echo.

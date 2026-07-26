@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import threading
-from unittest.mock import Mock
+from unittest.mock import Mock, call
 
 import pytest
 
-from src.browser.automation import BrowserAutomation
+from src.browser.automation import BrowserAutomation, PlaywrightError
 from src.config.manager import ConfigManager, VADANA_SITE_ADAPTER, default_vadana_profile
 from src.sites.base import LoginResult
 
@@ -117,6 +117,22 @@ def test_full_flow_calls_open_course_and_enter_not_goto_success(monkeypatch):
     monkeypatch.setattr("src.browser.automation.get_adapter", lambda name: adapter)
     assert BrowserAutomation(lambda m: None, threading.Event()).login_and_enter_class(cfg(), "pass") is True
     assert calls[:2] == ["open_course", "enter_online_class"]
+
+
+def test_browser_launch_falls_back_to_bundled_chromium():
+    chromium = Mock()
+    chromium.launch.side_effect = [
+        PlaywrightError("Chrome is not installed"),
+        "bundled-browser",
+    ]
+
+    result = BrowserAutomation._browser(Mock(chromium=chromium), headless=True)
+
+    assert result == "bundled-browser"
+    assert chromium.launch.call_args_list == [
+        call(channel="chrome", headless=True),
+        call(headless=True),
+    ]
 
 
 def test_full_flow_closes_owned_resources_after_farewell(monkeypatch):

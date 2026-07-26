@@ -119,19 +119,22 @@ def test_full_flow_calls_open_course_and_enter_not_goto_success(monkeypatch):
     assert calls[:2] == ["open_course", "enter_online_class"]
 
 
-def test_browser_launch_falls_back_to_bundled_chromium():
+def test_browser_launch_uses_installed_chrome_path_instead_of_bundled_chromium(monkeypatch, tmp_path):
+    chrome_path = tmp_path / "chrome.exe"
+    chrome_path.touch()
+    monkeypatch.setattr(BrowserAutomation, "_installed_chrome_path", lambda: chrome_path)
     chromium = Mock()
     chromium.launch.side_effect = [
         PlaywrightError("Chrome is not installed"),
-        "bundled-browser",
+        "installed-chrome",
     ]
 
     result = BrowserAutomation._browser(Mock(chromium=chromium), headless=True)
 
-    assert result == "bundled-browser"
+    assert result == "installed-chrome"
     assert chromium.launch.call_args_list == [
         call(channel="chrome", headless=True),
-        call(headless=True),
+        call(executable_path=str(chrome_path), headless=True),
     ]
 
 

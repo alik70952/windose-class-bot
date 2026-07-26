@@ -35,31 +35,35 @@ class BrowserAutomation:
 
     @staticmethod
     def _persistent_context(playwright, settings: BrowserSettings):
-        """Prefer installed Chrome, then Playwright Chromium, then a Windows Chrome path."""
+        """Launch the installed Google Chrome, including standard Windows paths."""
         options = {"user_data_dir": str(Path(settings.session_dir)), "headless": settings.headless}
         try:
             return playwright.chromium.launch_persistent_context(channel="chrome", **options)
         except PlaywrightError:
-            try:
-                return playwright.chromium.launch_persistent_context(**options)
-            except PlaywrightError:
-                candidates = (
-                    Path(os.environ.get("PROGRAMFILES", "")) / "Google/Chrome/Application/chrome.exe",
-                    Path(os.environ.get("PROGRAMFILES(X86)", "")) / "Google/Chrome/Application/chrome.exe",
-                    Path(os.environ.get("LOCALAPPDATA", "")) / "Google/Chrome/Application/chrome.exe",
-                )
-                chrome = next((path for path in candidates if path.is_file()), None)
-                if chrome is None:
-                    raise
-                return playwright.chromium.launch_persistent_context(executable_path=str(chrome), **options)
+            chrome = BrowserAutomation._installed_chrome_path()
+            if chrome is None:
+                raise
+            return playwright.chromium.launch_persistent_context(executable_path=str(chrome), **options)
+
+    @staticmethod
+    def _installed_chrome_path() -> Path | None:
+        candidates = (
+            Path(os.environ.get("PROGRAMFILES", "")) / "Google/Chrome/Application/chrome.exe",
+            Path(os.environ.get("PROGRAMFILES(X86)", "")) / "Google/Chrome/Application/chrome.exe",
+            Path(os.environ.get("LOCALAPPDATA", "")) / "Google/Chrome/Application/chrome.exe",
+        )
+        return next((path for path in candidates if path.is_file()), None)
 
     @staticmethod
     def _browser(playwright, *, headless: bool):
-        """Prefer installed Chrome and reliably fall back to bundled Chromium."""
+        """Launch Google Chrome without falling back to downloaded Chromium."""
         try:
             return playwright.chromium.launch(channel="chrome", headless=headless)
         except PlaywrightError:
-            return playwright.chromium.launch(headless=headless)
+            chrome = BrowserAutomation._installed_chrome_path()
+            if chrome is None:
+                raise
+            return playwright.chromium.launch(executable_path=str(chrome), headless=headless)
 
     def login_to_site(self, config: AppConfig, password: str, timeout_ms: int = 60_000) -> bool:
         """Run a site-adapter login in real Chrome without exposing credentials."""

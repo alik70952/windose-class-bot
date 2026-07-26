@@ -3,13 +3,11 @@ setlocal EnableExtensions
 cd /d "%~dp0"
 
 set "NO_PAUSE=0"
-set "SKIP_BROWSER=0"
 if /I "%CI%"=="1" set "NO_PAUSE=1"
 
 :parse_args
 if "%~1"=="" goto args_done
 if /I "%~1"=="--no-pause" set "NO_PAUSE=1"
-if /I "%~1"=="--skip-browser" set "SKIP_BROWSER=1"
 shift
 goto parse_args
 :args_done
@@ -60,13 +58,15 @@ if not exist "requirements.txt" (call :fail 1 "requirements.txt check" & exit /b
 "%VENV_PY%" -m pip install -r "requirements.txt"
 if errorlevel 1 (call :fail 1 "Install requirements" & exit /b 1)
 
-if "%SKIP_BROWSER%"=="1" (
-    echo Skipping Playwright browser installation by request.
-) else (
-    echo Installing the browser required by the automation...
-    "%VENV_PY%" -m playwright install chromium
-    if errorlevel 1 (call :fail 1 "Playwright browser installation" & exit /b 1)
+rem Use the Google Chrome already installed on Windows. Do not download the
+rem redundant Playwright Chromium browser during the first launch.
+call :check_chrome
+if errorlevel 1 (
+    echo Google Chrome was not found in the standard Windows installation paths.
+    echo Install Google Chrome, then run start.bat again. Chromium will not be downloaded.
+    call :fail 1 "Google Chrome detection" & exit /b 1
 )
+echo Using the Google Chrome already installed on this computer.
 
 "%VENV_PY%" -c "import customtkinter; import playwright; import keyring; import src.app"
 if errorlevel 1 (call :fail 1 "Startup import check" & exit /b 1)
@@ -104,6 +104,13 @@ echo Installation completed successfully.
 echo Run run.bat to start the application.
 if not "%NO_PAUSE%"=="1" pause
 exit /b 0
+
+:check_chrome
+where chrome.exe >nul 2>nul && exit /b 0
+if exist "%ProgramFiles%\Google\Chrome\Application\chrome.exe" exit /b 0
+if exist "%ProgramFiles(x86)%\Google\Chrome\Application\chrome.exe" exit /b 0
+if exist "%LocalAppData%\Google\Chrome\Application\chrome.exe" exit /b 0
+exit /b 1
 
 :fail
 echo.

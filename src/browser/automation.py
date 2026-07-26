@@ -21,6 +21,7 @@ from src.config.manager import VADANA_LOGIN_URL, VADANA_SITE_ADAPTER
 from src.sites import get_adapter
 from src.sites.vadana_sum39 import sanitize_diagnostic
 from src.browser.adobe_connect import AdobeConnectLauncher
+from src.browser.meeting_end import AdobeProcessController, MeetingEndMonitor
 
 LogCallback = Callable[[str], None]
 
@@ -105,6 +106,8 @@ class BrowserAutomation:
         playwright = None
         active_page = None
         result_status = ""
+        adobe_processes_before: set[int] = set()
+        meeting_finished = False
         keep_open = config.browser.keep_open and not config.browser.headless
         try:
             adapter = get_adapter(config.site_adapter)
@@ -130,6 +133,7 @@ class BrowserAutomation:
             self._check_stop()
             adapter.open_course(page, config.class_name, 60_000, self.stop_event)
             self._check_stop()
+            adobe_processes_before = AdobeProcessController().snapshot()
             self.log("در حال بررسی لینک ورود به کلاس")
             active_page = adapter.enter_online_class(page, config.class_name, timeout_ms, self.stop_event)
             self.log("در انتظار پاسخ صفحه کلاس")
@@ -144,7 +148,34 @@ class BrowserAutomation:
             self.log(result_status)
             self.log("جریان کامل ربات با موفقیت انجام شد")
             if keep_open and not self.stop_event.is_set():
-                self._wait_for_browser_to_stay_open(active_page or page)
+                if config.auto_close_on_farewell:
+                    self.log("پایش پیام‌های پایان کلاس فعال است؛ متن پیام‌ها ذخیره یا Log نمی‌شود.")
+                    monitor = MeetingEndMonitor(config.farewell_minimum_participants)
+                    monitor_status = monitor.wait(
+                        active_page or page,
+                        self.stop_event,
+                        config.meeting_monitor_timeout_seconds,
+                    )
+                    if monitor_status == "farewell_consensus":
+                        self.log("خسته‌نباشید جمعی شناسایی شد؛ جلسه به‌صورت خودکار بسته می‌شود.")
+                        try:
+                            (active_page or page).close()
+                        except Exception:
+                            pass
+                        closed = AdobeProcessController().close_new(adobe_processes_before)
+                        if closed:
+                            self.log("Adobe Connect اجراشده توسط ربات بسته شد.")
+                        meeting_finished = True
+                    elif monitor_status == "meeting_closed":
+                        self.log("جلسه توسط کاربر یا میزبان بسته شد.")
+                        meeting_finished = True
+                    elif monitor_status == "monitor_timeout":
+                        self.log("مهلت پایش پایان کلاس تمام شد؛ جلسه برای ایمنی باز می‌ماند.")
+                        self._wait_for_browser_to_stay_open(active_page or page)
+                    elif monitor_status == "stopped":
+                        self.log("پایش پایان کلاس توسط کاربر متوقف شد.")
+                else:
+                    self._wait_for_browser_to_stay_open(active_page or page)
             return True
         except Exception as exc:
             message = sanitize_diagnostic(str(exc))
@@ -153,7 +184,7 @@ class BrowserAutomation:
                 self._wait_for_browser_to_stay_open(active_page)
             raise
         finally:
-            should_close = (not keep_open and result_status not in {"needs_user_action", "browser_meeting_opened"}) or self.stop_event.is_set()
+            should_close = meeting_finished or (not keep_open and result_status not in {"needs_user_action", "browser_meeting_opened"}) or self.stop_event.is_set()
             if should_close:
                 if context is not None:
                     try:

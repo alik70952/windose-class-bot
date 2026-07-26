@@ -69,6 +69,14 @@ def test_vadana_domain_migrates_adapter(tmp_path):
     assert ConfigManager(path).load().site_adapter == VADANA_SITE_ADAPTER
 
 
+def test_invalid_monitor_numbers_in_user_config_use_safe_defaults(tmp_path):
+    path = tmp_path / "config.json"
+    path.write_text('{"farewell_minimum_participants":"bad","meeting_monitor_timeout_seconds":null}', encoding="utf-8")
+    config = ConfigManager(path).load()
+    assert config.farewell_minimum_participants == 2
+    assert config.meeting_monitor_timeout_seconds == 21_600
+
+
 def test_valid_session_skips_login_and_opens_course_then_enters():
     logs = []
     flow = BrowserAutomation(logs.append, threading.Event())
@@ -109,6 +117,41 @@ def test_full_flow_calls_open_course_and_enter_not_goto_success(monkeypatch):
     monkeypatch.setattr("src.browser.automation.get_adapter", lambda name: adapter)
     assert BrowserAutomation(lambda m: None, threading.Event()).login_and_enter_class(cfg(), "pass") is True
     assert calls[:2] == ["open_course", "enter_online_class"]
+
+
+def test_full_flow_closes_owned_resources_after_farewell(monkeypatch):
+    calls = []
+
+    class MeetingPage(Page):
+        def close(self): calls.append("page_close")
+
+    meeting_page = MeetingPage(dashboard=True, login=False)
+
+    class Context:
+        pages = [meeting_page]
+        def new_page(self): return meeting_page
+        def close(self): calls.append("context_close")
+
+    context = Context()
+    class Chromium:
+        def launch(self, **kwargs): return Mock(new_context=lambda: context, close=lambda: calls.append("browser_close"))
+    class PW:
+        chromium = Chromium()
+        def __enter__(self): return self
+        def __exit__(self, *a): calls.append("playwright_close")
+
+    adapter = Mock()
+    adapter.enter_online_class.return_value = meeting_page
+    config = cfg()
+    config.browser.keep_open = True
+    monkeypatch.setattr("src.browser.automation.sync_playwright", lambda: PW())
+    monkeypatch.setattr("src.browser.automation.get_adapter", lambda name: adapter)
+    monkeypatch.setattr("src.browser.automation.MeetingEndMonitor.wait", lambda *args: "farewell_consensus")
+    monkeypatch.setattr("src.browser.automation.AdobeProcessController.snapshot", lambda _self: set())
+    monkeypatch.setattr("src.browser.automation.AdobeProcessController.close_new", lambda _self, _before: 0)
+
+    assert BrowserAutomation(lambda _message: None).login_and_enter_class(config, "pass")
+    assert "page_close" in calls and "context_close" in calls and "playwright_close" in calls
 
 
 def test_stop_event_blocks_flow_before_browser():

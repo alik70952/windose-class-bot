@@ -45,6 +45,7 @@ class MainWindow(ctk.CTk):
         self.headless_var = ctk.BooleanVar(value=False)
         self.save_session_var = ctk.BooleanVar(value=False)
         self.save_password_var = ctk.BooleanVar(value=True)
+        self.auto_close_var = ctk.BooleanVar(value=True)
 
         self._mousewheel_bound = False
         self._build_ui()
@@ -101,6 +102,7 @@ class MainWindow(ctk.CTk):
         ctk.CTkCheckBox(options, text="اجرای Headless", variable=self.headless_var).grid(row=1, column=1, sticky="e", padx=12, pady=8)
         ctk.CTkCheckBox(options, text="ذخیره نشست ورود مرورگر", variable=self.save_session_var).grid(row=1, column=0, sticky="e", padx=12, pady=8)
         ctk.CTkCheckBox(options, text="ذخیره امن رمز عبور", variable=self.save_password_var).grid(row=2, column=1, sticky="e", padx=12, pady=8)
+        ctk.CTkCheckBox(options, text="بستن جلسه پس از خسته‌نباشید جمعی", variable=self.auto_close_var).grid(row=2, column=0, sticky="e", padx=12, pady=8)
 
         ctk.CTkLabel(container, text="عملیات", font=("Tahoma", 16, "bold"), anchor="e").pack(fill="x", pady=(12, 2))
         buttons = ctk.CTkFrame(container)
@@ -264,6 +266,7 @@ class MainWindow(ctk.CTk):
                 save_session=self.save_session_var.get(),
                 session_dir="browser-session/vadana-sum39" if "وادانا" in self.profile_entry.get() else "browser-session",
             ),
+            auto_close_on_farewell=self.auto_close_var.get(),
         )
 
     def _apply_config(self, config: AppConfig) -> None:
@@ -286,6 +289,7 @@ class MainWindow(ctk.CTk):
         self.keep_open_var.set(config.browser.keep_open)
         self.headless_var.set(config.browser.headless)
         self.save_session_var.set(config.browser.save_session)
+        self.auto_close_var.set(config.auto_close_on_farewell)
         password = self.credentials.get_password(config.profile_id, config.username)
         self.password_entry.delete(0, END)
         self.password_entry.insert(0, password)

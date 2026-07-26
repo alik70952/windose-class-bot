@@ -20,6 +20,14 @@ VADANA_LOGIN_URL = "https://vadana-sum39.ec.iau.ir/4043/login/index.php"
 VADANA_SITE_ADAPTER = "vadana_sum39"
 
 
+def _bounded_int(value: Any, default: int, minimum: int) -> int:
+    """Read a user-edited JSON integer without making the application unstartable."""
+    try:
+        return max(minimum, int(value))
+    except (TypeError, ValueError, OverflowError):
+        return default
+
+
 @dataclass(slots=True)
 class BrowserSettings:
     """Browser execution preferences stored outside the password vault."""
@@ -44,6 +52,9 @@ class AppConfig:
     browser: BrowserSettings = field(default_factory=BrowserSettings)
     schedules: list[ClassSchedule] = field(default_factory=list)
     scheduler_sqlite_migration_completed: bool = False
+    auto_close_on_farewell: bool = True
+    farewell_minimum_participants: int = 2
+    meeting_monitor_timeout_seconds: int = 21_600
 
 
 def default_vadana_profile() -> AppConfig:
@@ -120,6 +131,9 @@ class ConfigManager:
             ),
             schedules=schedules,
             scheduler_sqlite_migration_completed=bool(data.get("scheduler_sqlite_migration_completed", False)),
+            auto_close_on_farewell=bool(data.get("auto_close_on_farewell", True)),
+            farewell_minimum_participants=_bounded_int(data.get("farewell_minimum_participants"), 2, 2),
+            meeting_monitor_timeout_seconds=_bounded_int(data.get("meeting_monitor_timeout_seconds"), 21_600, 60),
         )
 
     def _migrate_schedules_once(self, config: AppConfig) -> None:

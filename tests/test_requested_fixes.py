@@ -37,6 +37,13 @@ def test_installer_retries_worker_registration_with_uac():
     assert "VADANA_WORKER_PY" in installer
 
 
+def test_installer_reuses_google_chrome_without_downloading_chromium():
+    installer = (Path(__file__).parents[1] / "install.bat").read_text(encoding="utf-8")
+    commands = "\n".join(line for line in installer.splitlines() if not line.lstrip().lower().startswith("rem "))
+    assert "call :check_chrome" in installer
+    assert "playwright install chromium" not in commands
+
+
 def test_adobe_uri_validation_and_safe_launch(monkeypatch):
     calls = []
     launcher = AdobeConnectLauncher(startfile=calls.append, process_checker=lambda: True)

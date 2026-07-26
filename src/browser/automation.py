@@ -53,6 +53,13 @@ class BrowserAutomation:
                     raise
                 return playwright.chromium.launch_persistent_context(executable_path=str(chrome), **options)
 
+    @staticmethod
+    def _browser(playwright, *, headless: bool):
+        """Prefer installed Chrome and reliably fall back to bundled Chromium."""
+        try:
+            return playwright.chromium.launch(channel="chrome", headless=headless)
+        except PlaywrightError:
+            return playwright.chromium.launch(headless=headless)
 
     def login_to_site(self, config: AppConfig, password: str, timeout_ms: int = 60_000) -> bool:
         """Run a site-adapter login in real Chrome without exposing credentials."""
@@ -65,7 +72,7 @@ class BrowserAutomation:
                     page = context.new_page() if not context.pages else context.pages[0]
                     browser = None
                 else:
-                    browser = playwright.chromium.launch(channel="chrome", headless=config.browser.headless)
+                    browser = self._browser(playwright, headless=config.browser.headless)
                     context = browser.new_context()
                     page = context.new_page()
 
@@ -119,7 +126,7 @@ class BrowserAutomation:
                 context = self._persistent_context(playwright, config.browser)
                 page = context.new_page() if not context.pages else context.pages[0]
             else:
-                browser = playwright.chromium.launch(channel="chrome", headless=config.browser.headless)
+                browser = self._browser(playwright, headless=config.browser.headless)
                 context = browser.new_context()
                 page = context.new_page()
             active_page = page
@@ -140,10 +147,6 @@ class BrowserAutomation:
             result_status = self._handle_adobe_connect(context, active_page, launch_adobe_connect, adobe_launch_wait_seconds)
             if result_status not in {"adobe_connect_launched", "browser_meeting_opened", "needs_user_action"}:
                 raise RuntimeError(result_status)
-
-            if False and launch_adobe_connect and config.adobe_connect_url:
-                self.log("در صورت نیاز Adobe Connect توسط لینک کلاس یا آدرس تنظیم‌شده باز می‌شود")
-                active_page.goto(config.adobe_connect_url, wait_until="domcontentloaded", timeout=60_000)
 
             self.log(result_status)
             self.log("جریان کامل ربات با موفقیت انجام شد")

@@ -50,16 +50,18 @@ class FarewellConsensus:
         self.minimum_participants = max(2, minimum_participants)
 
     def reached(self, messages: Iterable[ChatMessage]) -> bool:
-        latest_by_sender: dict[str, str] = {}
-        for message in messages:
+        # Only the uninterrupted farewell tail represents the current end-of-class
+        # consensus. Older questions must not keep the meeting open forever.
+        farewell_senders: set[str] = set()
+        for message in reversed(list(messages)):
             sender = normalize_persian(message.sender)
             text = message.text.strip()
-            if sender and text:
-                latest_by_sender[sender] = text
-        return (
-            len(latest_by_sender) >= self.minimum_participants
-            and all(is_farewell(text) for text in latest_by_sender.values())
-        )
+            if not sender or not text:
+                continue
+            if not is_farewell(text):
+                break
+            farewell_senders.add(sender)
+        return len(farewell_senders) >= self.minimum_participants
 
 
 class AdobeProcessController:
@@ -93,7 +95,7 @@ class AdobeProcessController:
         for pid in self.snapshot() - before:
             try:
                 result = self.runner(
-                    ["taskkill.exe", "/PID", str(pid), "/T"],
+                    ["taskkill.exe", "/PID", str(pid), "/T", "/F"],
                     capture_output=True, text=True, check=False, timeout=10,
                 )
                 closed += int(result.returncode == 0)

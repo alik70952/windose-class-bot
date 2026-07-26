@@ -34,6 +34,16 @@ def test_consensus_requires_distinct_identified_participants_and_every_latest_me
     ])
 
 
+def test_old_conversation_does_not_block_recent_farewell_consensus():
+    consensus = FarewellConsensus(minimum_participants=2)
+    assert consensus.reached([
+        ChatMessage("علی", "سؤال دارم"),
+        ChatMessage("مریم", "پاسخ سؤال"),
+        ChatMessage("علی", "خسته نباشید"),
+        ChatMessage("مریم", "خدا قوت"),
+    ])
+
+
 def test_monitor_does_not_log_or_persist_chat_and_detects_consensus():
     page = Mock()
     page.is_closed.return_value = False
@@ -52,7 +62,7 @@ def test_process_controller_closes_only_new_adobe_pid(monkeypatch):
     runner = Mock(side_effect=[listing, killed])
     controller = AdobeProcessController(runner)
     assert controller.close_new(set()) == 1
-    assert runner.call_args_list[1].args[0] == ["taskkill.exe", "/PID", "10", "/T"]
+    assert runner.call_args_list[1].args[0] == ["taskkill.exe", "/PID", "10", "/T", "/F"]
 
 
 def test_process_controller_failure_is_safe(monkeypatch):

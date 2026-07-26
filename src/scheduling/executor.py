@@ -44,7 +44,9 @@ class ScheduleExecutor:
         config.class_name = schedule.class_name
         config.browser.headless = False
         config.browser.save_session = True
-        config.browser.keep_open = False  # completion releases Playwright before the next queued class
+        # Keep ownership of the meeting until it ends; the farewell monitor then
+        # releases Chrome/Adobe before the worker accepts another class.
+        config.browser.keep_open = True
         config.browser.session_dir = str(PROJECT_ROOT / "browser-session" / "scheduled" / config.profile_id)
         automation = BrowserAutomation(self.log, stop_event or threading.Event())
         # This is deliberately the only worker browser entry point.
